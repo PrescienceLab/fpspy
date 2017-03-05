@@ -392,6 +392,7 @@ static int bringup()
 */
 
 sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
+int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
 int (*orig_feenableexcept)(int) = 0 ;
 int (*orig_fedisableexcept)(int) = 0 ;
 int (*orig_fegetexcept)() = 0 ;
@@ -407,7 +408,10 @@ int (*orig_feholdexcept)(fenv_t *envp) = 0;
 int (*orig_fesetenv)(const fenv_t *envp) = 0;
 int (*orig_feupdateenv)(const fenv_t *envp) = 0;
 
-void stringify_current_fe_exceptions(char *buf)
+static struct sigaction oldsa_fpe, oldsa_trap;
+
+
+static void stringify_current_fe_exceptions(char *buf)
 {
   buf[0]=0;
 
@@ -419,131 +423,136 @@ void stringify_current_fe_exceptions(char *buf)
   FE_HANDLE(FE_UNDERFLOW);
 }
 
-void show_current_fe_exceptions()
+static void show_current_fe_exceptions()
 {
   char buf[80];
   stringify_current_fe_exceptions(buf);
   INFO("%s\n", buf);
 }
 
-// need to do sigaction too... 
+static void abort_operation(char *reason)
+{
+  if (!aborted) { 
+    if (mode==INDIVIDUAL) { 
+      sigaction(SIGFPE,&oldsa_fpe,0);
+    }
+    aborted = 1;
+    DEBUG("Aborted operation because %s\n",reason);
+  }
+}
+
 sighandler_t signal(int sig, sighandler_t func)
 {
   if (sig==SIGFPE) { 
-    DEBUG("Aborted operation because target is using SIGFPE\n");
-    aborted = 1;
+    abort_operation("target is using signal with SIGFPE");
   }
   return orig_signal(sig,func);
 }
 
+int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
+{
+  if (sig==SIGFPE) { 
+    abort_operation("target is using sigaction with SIGFPE");
+  }
+  return orig_sigaction(sig,act,oldact);
+}
+
+
 int feclearexcept(int excepts)
 {
-  DEBUG("Aborted operation because target is using feclearexcept\n");
-  aborted = 1;
+  abort_operation("target is using feclearexcept");
   return orig_feclearexcept(excepts);
 }
 
 int feenableexcept(int excepts)
 {
-  DEBUG("Aborted operation because target is using feenableexcept\n");
-  aborted = 1;
+  abort_operation("target is using feenableexcept");
   return orig_feenableexcept(excepts);
 }
 
 int fedisableexcept(int excepts)
 {
-  DEBUG("Aborted operation because target is using fedisableexcept\n");
-  aborted = 1;
+  abort_operation("target is using fedisableexcept");
   return orig_fedisableexcept(excepts);
 }
 
 int fegetexcept(void)
 {
-  DEBUG("Aborted operation because target is using fegetexcept\n");
-  aborted = 1;
+  abort_operation("target is using fegetexcept");
   return orig_fegetexcept();
 }
 
 int fegetexceptflag(fexcept_t *flagp, int excepts)
 {
-  DEBUG("Aborted operation because target is using fegetexceptflag\n");
-  aborted = 1;
+  abort_operation("target is using fegetexceptflag");
   return orig_fegetexceptflag(flagp, excepts);
 }
 
 int feraiseexcept(int excepts) 
 {
-  DEBUG("Aborted operation because target is using feraiseexcept\n");
-  aborted = 1;
+  abort_operation("target is using feraiseexcept");
   return orig_feraiseexcept(excepts);
 }
 
 int fesetexceptflag(const fexcept_t *flagp, int excepts)
 {
-  DEBUG("Aborted operation because target is using fesetexceptflag\n");
-  aborted = 1;
+  abort_operation("target is using fesetexceptflag");
   return orig_fesetexceptflag(flagp, excepts);
 }
 
 int fetestexcept(int excepts)
 {
-  DEBUG("Aborted operation because target is using fetestexcept\n");
-  aborted = 1;
+  abort_operation("target is using fetestexcept");
   return orig_fetestexcept(excepts);
 }
 
 int fegetround(void)
 {
-  DEBUG("Aborted operation because target is using fegetround\n");
-  aborted = 1;
+  abort_operation("target is using fegetround");
   return orig_fegetround();
 }
 
 int fesetround(int rounding_mode)
 {
-  DEBUG("Aborted operation because target is using fesetround\n");
-  aborted = 1;
+  abort_operation("target is using fesetround");
   return orig_fesetround(rounding_mode);
 }
 
 int fegetenv(fenv_t *envp)
 {
-  DEBUG("Aborted operation because target is using fegetenv\n");
-  aborted = 1;
+  abort_operation("target is using fegetenv");
   return orig_fegetenv(envp);
 
 }
 
 int feholdexcept(fenv_t *envp)
 {
-  DEBUG("Aborted operation because target is using feholdexcept\n");
-  aborted = 1;
+  abort_operation("target is using feholdexcept");
   return orig_feholdexcept(envp);
 }
 
 
 int fesetenv(const fenv_t *envp)
 {
-  DEBUG("Aborted operation because target is using fesetenv\n");
-  aborted = 1;
+  abort_operation("target is using fesetenv");
   return orig_fesetenv(envp);
 }
 
 int feupdateenv(const fenv_t *envp)
 {
-  DEBUG("Aborted operation because target is using feupdateenv\n");
-  aborted = 1;
+  abort_operation("target is using feupdateenv");
   return orig_feupdateenv(envp);
 }
 
     
-int setup_shims()
+static int setup_shims()
 {
   DEBUG("shim setup\n");
 
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { return -1; }
   if (mode==INDIVIDUAL) {
     SHIMIFY(signal);
+    SHIMIFY(sigaction);
   }
   SHIMIFY(feclearexcept);
   SHIMIFY(feenableexcept);
@@ -562,16 +571,68 @@ int setup_shims()
   return 0;
 }
 
-void sigfpe_handler(int signo)
+static void nop_it(char *ptr, int num)
 {
-  char buf[80];
-
-  stringify_current_fe_exceptions(buf);
-  DEBUG("Caught SIGFPE: FPEs: %s\n",buf);
-  abort();
+  for (; num>0; ptr++, num--) {
+    *ptr=0x90;
+  }
 }
 
-int bringup()
+inline void flip_trap_flag()
+{
+  __asm__ __volatile__ ("pushfq; "
+			"xorq $0x100, (%%rsp); "
+			"popfq; "
+			: : : "memory"); 
+}
+
+inline void set_trap_flag_context(ucontext_t *uc, int val)
+{
+  if (val) {
+    uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL; 
+  } else {
+    uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL; 
+  }
+}
+
+static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
+{
+  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
+	si->si_signo, si->si_errno, si->si_code, si->si_addr);
+}
+
+static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
+{
+  ucontext_t *uc = (ucontext_t *)priv;
+  char buf[80];
+
+
+#define CASE(X) case X : strcpy(buf, #X); break; 
+  switch (si->si_code) {
+    CASE(FPE_FLTDIV);
+    CASE(FPE_FLTINV);
+    CASE(FPE_FLTOVF);
+    CASE(FPE_FLTUND);
+    CASE(FPE_FLTRES);
+    CASE(FPE_FLTSUB);
+    CASE(FPE_INTDIV);
+    CASE(FPE_INTOVF);
+  default:
+    sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
+    break;
+  }
+
+  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p %s\n",
+	si->si_signo, si->si_errno, si->si_code, si->si_addr,buf);
+    
+  set_trap_flag_context(uc,1);
+
+  //orig_fedisableexcept(FE_ALL_EXCEPT);
+  //xs  nop_it(si->si_addr,4);
+    //  abort();
+}
+
+static int bringup()
 {
   if (setup_shims()) { 
     ERROR("Cannot setup shims\n");
@@ -579,8 +640,23 @@ int bringup()
   }
   orig_feclearexcept(FE_ALL_EXCEPT);
   if (mode==INDIVIDUAL) {
-    orig_signal(SIGFPE,sigfpe_handler);
+    struct sigaction sa;
+
+    memset(&sa,0,sizeof(sa));
+    sa.sa_sigaction = sigfpe_handler;
+    sa.sa_flags |= SA_SIGINFO;
+    
+    orig_sigaction(SIGFPE,&sa,&oldsa_fpe);
+
+    memset(&sa,0,sizeof(sa));
+    sa.sa_sigaction = sigtrap_handler;
+    sa.sa_flags |= SA_SIGINFO;
+    
+    orig_sigaction(SIGTRAP,&sa,&oldsa_trap);
+
+
     orig_feenableexcept(FE_ALL_EXCEPT);
+
   }
   inited=1;
   return 0;
