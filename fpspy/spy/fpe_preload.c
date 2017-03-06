@@ -24,11 +24,9 @@
     fpe exceptions have occurred during its execution.
 
   - Individual.  Here we intercept each exception that occurs, using a debugger-style
-    approach of, on exception, inserting a breakpoint immediately after the faulting 
-    instruction, rerunning the instruction with fpe handling off, then using the 
-    breakpoint to reenable fpe exception delivery.  [This is a work in progress
-    since we need enough of an emulator to determine the size of the faulting instruction]
-
+    approach of, on exception, disabling exceptions, switching to trap mode, then
+    restarting the instruction, then fauling on trap at the next instruction, then
+    switching exceptions back on and switching traps off
 */
 
 #define _GNU_SOURCE
@@ -413,7 +411,6 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   r.code =  si->si_code;
   r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
 
-  DEBUG("Writing record %d\n",mc->count);
   if (write(mc->fd,&r,sizeof(r))!=sizeof(r)) { 
     ERROR("Failed to write record\n");
   }
@@ -461,7 +458,7 @@ static int bringup_monitoring_context(int pid)
     return -1;
   }
 
-  sprintf(name,"__%s.%d.%lu.individual.fpemon", program_invocation_short_name, pid, time(0));
+  sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), pid);
   if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
     ERROR("Cannot open monitoring output file\n");
     free_monitoring_context(pid);
@@ -562,8 +559,8 @@ static __attribute__((destructor)) void syscall_preload_deinit(void)
       int fd;
       //DEBUG("FP exceptions seen during run are:\n");
       //show_current_fe_exceptions();
-      sprintf(buf,"__%s.%d.%lu.aggregate.fpemon", program_invocation_short_name, getpid(), time(0));
-      if ((fd = open(buf,O_CREAT | O_WRONLY, 0666)<0)) { 
+      sprintf(buf,"__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0),getpid());
+      if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
 	ERROR("Cannot open monitoring output file\n");
       } else {
 	stringify_current_fe_exceptions(buf);
