@@ -49,13 +49,23 @@
 #include <time.h>
 #include <fcntl.h>
 
+
+#define DEBUG_OUTPUT 0
+#define NO_OUTPUT 1
+
+#if DEBUG_OUTPUT
+#define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug: " S, ##__VA_ARGS__)
+#else 
+#define DEBUG(S, ...) 
+#endif
+
+#if NO_OUTPUT
+#define INFO(S, ...) 
+#define ERROR(S, ...)
+#else
 #define INFO(S, ...) fprintf(stderr,  "fpe_preload: info: " S, ##__VA_ARGS__)
 #define ERROR(S, ...) fprintf(stderr, "fpe_preload: ERROR: " S, ##__VA_ARGS__)
-#define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug: " S, ##__VA_ARGS__)
-
-//#define INFO(S, ...) 
-//#define ERROR(S, ...)
-//#define DEBUG(S, ...) 
+#endif
 
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
@@ -89,6 +99,8 @@ struct individual_record {
   void    *rsp;
   int      code;  // as in siginfo_t->si_code
   int      mxcsr; 
+  char     instruction[15];
+  char     pad;
 } __packed;
 
 typedef struct individual_record individual_record_t;
@@ -128,7 +140,6 @@ static monitoring_context_t *find_monitoring_context(int pid)
   int i;
   lock_contexts();
   for (i=0;i<MAX_CONTEXTS;i++) { 
-    //DEBUG("Searching for %d, considering %d getpid()=%d\n",pid,context[i].pid,getpid());
     if (context[i].pid == pid) {
       unlock_contexts();
       return &context[i];
@@ -394,7 +405,6 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(getpid());
   ucontext_t *uc = (ucontext_t *)priv;
-  char buf[80];
 
   if (!mc) { 
     clear_fp_exceptions_context(uc);     // exceptions cleared
@@ -404,17 +414,21 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     return;
   }
 
-  individual_record_t r;
+  individual_record_t r;  
   
   r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
   r.rsp = (void*) uc->uc_mcontext.gregs[REG_RSP];
   r.code =  si->si_code;
   r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
+  memcpy(r.instruction,r.rip,15);
+  r.pad = 0;
 
   if (write(mc->fd,&r,sizeof(r))!=sizeof(r)) { 
     ERROR("Failed to write record\n");
   }
 
+#if DEBUG_OUTPUT
+  char buf[80];
 #define CASE(X) case X : strcpy(buf, #X); break; 
   switch (si->si_code) {
     CASE(FPE_FLTDIV);
@@ -429,6 +443,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
     break;
   }
+#endif
   
   DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p %s\n",
 	si->si_signo, si->si_errno, si->si_code, si->si_addr,buf);
@@ -465,8 +480,6 @@ static int bringup_monitoring_context(int pid)
     return -1;
   }
 
-  DEBUG("fd = %d\n",c->fd);
-  
   c->state = AWAIT_FPE;
   c->count = 0;
 
@@ -557,7 +570,7 @@ static __attribute__((destructor)) void syscall_preload_deinit(void)
     if (mode==AGGREGATE) {
       char buf[80];
       int fd;
-      //DEBUG("FP exceptions seen during run are:\n");
+      DEBUG("Dumping aggregate exceptions\n");
       //show_current_fe_exceptions();
       sprintf(buf,"__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0),getpid());
       if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
@@ -570,7 +583,7 @@ static __attribute__((destructor)) void syscall_preload_deinit(void)
       }
     } else {
       int i;
-      DEBUG("FPE exceptions previously dumped to files\n");
+      DEBUG("FPE exceptions previously dumped to files - now closing them\n");
       for (i=0;i<MAX_CONTEXTS;i++) { 
 	if (context[i].pid) { 
 	  close(context[i].fd);

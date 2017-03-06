@@ -1,7 +1,6 @@
 /*
 
-  Preload library for system call interception and interposition using 
-  ptrace() mechanisms at user-level
+  Test code for floating point exception interception
 
   Copyright (c) 2017 Peter A. Dinda
 
