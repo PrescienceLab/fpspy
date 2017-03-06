@@ -48,6 +48,8 @@
 #include <string.h>
 #include <sched.h>
 #include <signal.h>
+#include <time.h>
+#include <fcntl.h>
 
 #define INFO(S, ...) fprintf(stderr,  "fpe_preload: info: " S, ##__VA_ARGS__)
 #define ERROR(S, ...) fprintf(stderr, "fpe_preload: ERROR: " S, ##__VA_ARGS__)
@@ -59,337 +61,9 @@
 
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
+volatile static int maxcount=65546; // maximum number to record, per thread
 
-enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
-
-typedef struct syscall {
-  uint64_t number;
-  uint64_t arg[6];
-  uint64_t rc;
-} syscall_t;
-
-#define STACK_SIZE (4096*16)
-static int  monitor_pid=-1;
-static int  target_pid=-1; 
-static char monitor_stack[2*STACK_SIZE];
-static syscall_t cur_syscall;
-
-
-#define PEEK(d,pid,s)  \
-  (d) = ptrace(PTRACE_PEEKUSER,(pid),8*(s),0);	\
-  if (errno) { perror("peek " #s); return -1; } 
-
-#define POKE(d,pid,s)  \
-  if (ptrace(PTRACE_POKEUSER,(pid),8*(d),&s)<0) { perror("poke " #s); return -1; } 
-
-
-static int peek_regs(int pid, struct user_regs_struct *regs)
-{
-  if (ptrace(PTRACE_GETREGS, pid, 0, regs)<0) { 
-    return -1;
-  } else {
-    return 0;
-  }
-}
-
-static int poke_regs(int pid, struct user_regs_struct *regs)
-{
-  if (ptrace(PTRACE_SETREGS, pid, 0, regs)<0) { 
-    return -1;
-  } else {
-    return 0;
-  }
-}
-
-// Fetch request
-static int extract_syscall_request(syscall_t *s)
-{
-  struct user_regs_struct regs;
-  if (peek_regs(target_pid,&regs)) { 
-    ERROR("can't get registers\n");
-    return -1;
-  }
-  s->number  = regs.orig_rax;
-  s->arg[0] = regs.rdi;
-  s->arg[1] = regs.rsi;
-  s->arg[2] = regs.rdx;
-  s->arg[3] = regs.r10;
-  s->arg[4] = regs.r8;
-  s->arg[5] = regs.r9;
-
-  return 0;
-}
-
-// Fetch response
-static int extract_syscall_response(syscall_t *s)
-{
-  struct user_regs_struct regs;
-  if (peek_regs(target_pid,&regs)) { 
-    ERROR("can't get registers\n");
-    return -1;
-  }
-  s->rc = regs.rax;
-  return 0;
-}
-
-// Update a request
-static int update_syscall_request(syscall_t *s)
-{
-  struct user_regs_struct regs;
-
-  if (peek_regs(target_pid,&regs)) { 
-    ERROR("can't get registers\n");
-    return -1;
-  }
-
-  regs.orig_rax = s->number;
-  regs.rdi = s->arg[0];
-  regs.rsi = s->arg[1];
-  regs.rdx = s->arg[2];
-  regs.r10 = s->arg[3];
-  regs.r8 =  s->arg[4];
-  regs.r9 =  s->arg[5];
-
-  if (poke_regs(target_pid,&regs)) { 
-    ERROR("can't set registers\n");
-    return -1;
-  }
-
-  return 0;
-}
-
-
-static int update_syscall_response(syscall_t *s)
-{
-  struct user_regs_struct regs;
-
-  if (peek_regs(target_pid,&regs)) { 
-    ERROR("can't get registers\n");
-    return -1;
-  }
-
-  regs.rax = s->rc;
-
-  if (poke_regs(target_pid,&regs)) { 
-    ERROR("can't set registers\n");
-    return -1;
-  }
-
-  return 0;
-}
-
-
-
-static int print_syscall(syscall_t *s) 
-{
-  INFO("syscall number=0x%lx\n", s->number);
-  INFO("syscall arg[0]=0x%lx\n", s->arg[0]);
-  INFO("syscall arg[1]=0x%lx\n", s->arg[1]);
-  INFO("syscall arg[2]=0x%lx\n", s->arg[2]);
-  INFO("syscall arg[3]=0x%lx\n", s->arg[3]);
-  INFO("syscall arg[4]=0x%lx\n", s->arg[4]);
-  INFO("syscall arg[5]=0x%lx\n", s->arg[5]);
-  INFO("syscall     rc=0x%lx\n", s->rc);
-  
-  return 0;
-}
-
-static uint64_t last_syscall_num;
-static uint64_t last_len;
-
-/*
-  Filter and modify a system call on entry
-*/
-static int cook_entry()
-{
-  INFO("entry\n");
-  if (extract_syscall_request(&cur_syscall)) {
-    ERROR("cannot extract syscall request");
-    return -1;
-  }
-  print_syscall(&cur_syscall);
-
-#if 0
-  last_syscall_num=-1;
-  last_len=0;
-  return 0;
-#endif
-
-  // here we would modify it an then
-  // invoke update_syscall_request
-  // this is a hacky example: convert any write system call to a getpid
-  if (cur_syscall.number == 1) { 
-    INFO("Replacing write(%lu,%p (%s), %lu) with getpid()\n",
-	 cur_syscall.arg[0], 
-	 (char*)cur_syscall.arg[1], 
-	 (char*)cur_syscall.arg[1], 
-	 cur_syscall.arg[2]);
-
-
-    cur_syscall.number = 39; // getpid
-    
-    if (update_syscall_request(&cur_syscall)) { 
-      ERROR("cannot update system call request\n");
-      return -1;
-    }
-
-    // stash away the relevant stuff for the entry
-    last_len = cur_syscall.arg[2];
-    last_syscall_num = 1;
-  } else {
-    last_syscall_num = -1;
-    last_len =0 ;
-  }
-  
-  return 0;
-}
-
-static int cook_exit()
-{
-  INFO("exit\n");
-  if (extract_syscall_response(&cur_syscall)) { 
-    ERROR("cannot extract syscall response");
-    return -1;
-  }
-  print_syscall(&cur_syscall);
-    
-  // here we would modify the response
-  // and then invoke update_syscall_response;
-  // example - replace write with getpid() - now return expected write length
-  if (last_syscall_num == 1) { 
-    INFO("rc=%ld - pretending to complete write() call with rc=%lu\n",cur_syscall.rc,last_len);
-
-    cur_syscall.rc = last_len;
-
-    if (update_syscall_response(&cur_syscall)) { 
-      ERROR("cannot update system call request\n");
-      return -1;
-    }
-
-    last_syscall_num = -1;
-    last_len = 0;
-  }
-  
-  return 0;
-}
-
-
-
-
-/*
-  Note that monitor needs to be conservative
-  in the use of libc, etc, since we cannot assume we are linked
-  with the reentrant/thread-safe version
-*/
-static int monitor(void *x)
-{
-  int status;
-  enum {WAIT_FOR_ENTRY, WAIT_FOR_EXIT} state;
-
-  INFO("monitor pid=%d ppid=%d\n",getpid(),getppid());
-  INFO("monitor (pid=%d) running with target pid %d\n",monitor_pid,target_pid);
-  
-  if (ptrace(PTRACE_ATTACH,
-	     target_pid,
-	     0, 0)<0) {
-    perror("ptrace-attach");
-    ERROR("cannot attach\n");
-    return -1;
-  }
-
-  // wait for target to catch up to us and pause
-  waitpid(target_pid,0,0);
-  
-  if (ptrace(PTRACE_SETOPTIONS,
-	     target_pid,
-	     0,
-	     PTRACE_O_TRACESYSGOOD)<0) { 
-    perror("ptrace-set-options");	       
-    ERROR("cannot set options\n");
-    return -1;
-  }
-
-  INFO("attached\n");
-
-  // target is now paused
-
-  inited=1;
-
-  state = WAIT_FOR_ENTRY;
-
-  while (1) { 
-    // continue target to next syscall entry or exit or other event
-    if (ptrace(PTRACE_SYSCALL,
-	       target_pid,
-	       0, 0)<0) { 
-      perror("ptrace-entry");
-      ERROR("cannot trace system call entry\n");
-      return -1;
-    }
-
-    // find out what event happened
-    waitpid(target_pid,&status,0);
-
-    // check explicitly for an exit, since this must not happen
-    if (WIFEXITED(status)) { 
-      INFO("target exited with rc=%d\n",WEXITSTATUS(status));
-      // target is dead - uh cannot happen...
-      ERROR("target dead!\n");
-      return -1;
-    }
-
-    // otherwise, we care only about system calls
-    if (!(WIFSTOPPED(status) && (WSTOPSIG(status)&0x80))) {
-      INFO("skipping non-syscall\n");
-      // target stopped for something other than a syscall, so just continue it;
-      continue;
-    } 
-
-    // now we are in a system call entry or exit
-
-    if (state==WAIT_FOR_ENTRY) { 
-      cook_entry();
-      state=WAIT_FOR_EXIT;
-    } else if (state==WAIT_FOR_EXIT) {
-      cook_exit();
-      state=WAIT_FOR_ENTRY;
-    } else {
-      ERROR("impossible state!\n");
-    }
-
-  }
-
-  INFO("monitor exit\n");
-  inited=0;
-  return 0;
-}
-
-/*
-static int bringup()
-{
-  // clone a thread with a distinct pid that will ptrace the parent
-  // and its children
-
-  // We will trace the parent
-  target_pid = getpid();
-
-  monitor_pid = clone(monitor,
-		      monitor_stack+STACK_SIZE,
-		      CLONE_FILES | CLONE_FS | CLONE_IO | CLONE_VM | CLONE_SIGHAND | SIGCHLD,
-		      (void*)(long)target_pid,
-		      0,0,0);
-
-  if (monitor_pid<0) { 
-    perror("clone");
-    ERROR("Unable to clone monitor\n");
-    return -1;
-  }
-
-  INFO("monitor (pid=%d) launched by pid %d\n", monitor_pid, target_pid);
-  return 0;
-
-}
-*/
+volatile enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 
 sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
 int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
@@ -410,6 +84,91 @@ int (*orig_feupdateenv)(const fenv_t *envp) = 0;
 
 static struct sigaction oldsa_fpe, oldsa_trap;
 
+#define MAX_CONTEXTS 10
+
+struct individual_record {
+  void    *rip;
+  void    *rsp;
+  int      code;  // as in siginfo_t->si_code
+  int      mxcsr; 
+} __packed;
+
+typedef struct individual_record individual_record_t;
+
+
+// This is to allow us to handle multiple threads 
+// and to follow forks later
+typedef struct monitoring_context {
+  enum {AWAIT_FPE, AWAIT_TRAP} state;
+  int pid;
+  int fd; 
+  int count;
+} monitoring_context_t;
+
+static int  context_lock;
+static monitoring_context_t context[MAX_CONTEXTS];
+
+static void init_monitoring_contexts()
+{
+  memset(context,0,sizeof(context));
+  context_lock=0;
+}
+
+static void lock_contexts()
+{
+  while (!__sync_bool_compare_and_swap(&context_lock,0,1)) {}
+}
+
+static void unlock_contexts()
+{
+  __sync_and_and_fetch(&context_lock,0);
+}
+
+
+static monitoring_context_t *find_monitoring_context(int pid)
+{
+  int i;
+  lock_contexts();
+  for (i=0;i<MAX_CONTEXTS;i++) { 
+    //DEBUG("Searching for %d, considering %d getpid()=%d\n",pid,context[i].pid,getpid());
+    if (context[i].pid == pid) {
+      unlock_contexts();
+      return &context[i];
+    }
+  }
+  unlock_contexts();
+  return 0;
+}
+
+static monitoring_context_t *alloc_monitoring_context(int pid)
+{
+  int i;
+  lock_contexts();
+  for (i=0;i<MAX_CONTEXTS;i++) { 
+    if (!context[i].pid) {
+      context[i].pid = pid;
+      unlock_contexts();
+      return &context[i];
+    }
+  }
+  unlock_contexts();
+  return 0;
+}
+
+static void free_monitoring_context(int pid)
+{
+  int i;
+  lock_contexts();
+  for (i=0;i<MAX_CONTEXTS;i++) { 
+    if (context[i].pid == pid) {
+      context[i].pid = 0;
+      unlock_contexts();
+    }
+  }
+  unlock_contexts();
+}
+
+
 
 static void stringify_current_fe_exceptions(char *buf)
 {
@@ -423,12 +182,14 @@ static void stringify_current_fe_exceptions(char *buf)
   FE_HANDLE(FE_UNDERFLOW);
 }
 
+/*
 static void show_current_fe_exceptions()
 {
   char buf[80];
   stringify_current_fe_exceptions(buf);
   INFO("%s\n", buf);
 }
+*/
 
 static void abort_operation(char *reason)
 {
@@ -571,20 +332,6 @@ static int setup_shims()
   return 0;
 }
 
-static void nop_it(char *ptr, int num)
-{
-  for (; num>0; ptr++, num--) {
-    *ptr=0x90;
-  }
-}
-
-inline void flip_trap_flag()
-{
-  __asm__ __volatile__ ("pushfq; "
-			"xorq $0x100, (%%rsp); "
-			"popfq; "
-			: : : "memory"); 
-}
 
 inline void set_trap_flag_context(ucontext_t *uc, int val)
 {
@@ -595,17 +342,81 @@ inline void set_trap_flag_context(ucontext_t *uc, int val)
   }
 }
 
+
+inline void clear_fp_exceptions_context(ucontext_t *uc)
+{
+  uc->uc_mcontext.fpregs->mxcsr &= ~0x3f; 
+}
+
+inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
+{
+  if (mask) {
+    uc->uc_mcontext.fpregs->mxcsr |= 0x1f80;
+  } else {
+    uc->uc_mcontext.fpregs->mxcsr &= ~0x1f80;
+  }
+}
+
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
+  monitoring_context_t *mc = find_monitoring_context(getpid());
+  ucontext_t *uc = (ucontext_t *)priv;
+
+  if (!mc) { 
+    clear_fp_exceptions_context(uc);     // exceptions cleared
+    set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_trap_flag_context(uc,0);         // traps disabled
+    abort_operation("Cannot find monitoring context during sigtrap_handler exec");
+    return;
+  }
+
   DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
 	si->si_signo, si->si_errno, si->si_code, si->si_addr);
+
+  if (mc->state == AWAIT_TRAP) { 
+    mc->count++;
+    clear_fp_exceptions_context(uc);      // exceptions cleared
+    if (maxcount!=-1 && mc->count >= maxcount) { 
+      // disable further operation since we've recorded enough
+      set_mask_fp_exceptions_context(uc,1); // exceptions masked
+    } else {
+      set_mask_fp_exceptions_context(uc,0); // exceptions unmasked
+    }
+    set_trap_flag_context(uc,0);          // traps disabled
+    mc->state = AWAIT_FPE;
+  } else {
+    clear_fp_exceptions_context(uc);     // exceptions cleared
+    set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_trap_flag_context(uc,0);         // traps disabled
+    abort_operation("Surprise state during sigtrap_handler exec");
+  }
 }
 
 static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 {
+  monitoring_context_t *mc = find_monitoring_context(getpid());
   ucontext_t *uc = (ucontext_t *)priv;
   char buf[80];
 
+  if (!mc) { 
+    clear_fp_exceptions_context(uc);     // exceptions cleared
+    set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_trap_flag_context(uc,0);         // traps disabled
+    abort_operation("Cannot find monitoring context during sigfpe_handler exec");
+    return;
+  }
+
+  individual_record_t r;
+  
+  r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
+  r.rsp = (void*) uc->uc_mcontext.gregs[REG_RSP];
+  r.code =  si->si_code;
+  r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
+
+  DEBUG("Writing record %d\n",mc->count);
+  if (write(mc->fd,&r,sizeof(r))!=sizeof(r)) { 
+    ERROR("Failed to write record\n");
+  }
 
 #define CASE(X) case X : strcpy(buf, #X); break; 
   switch (si->si_code) {
@@ -621,15 +432,48 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
     break;
   }
-
+  
   DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p %s\n",
 	si->si_signo, si->si_errno, si->si_code, si->si_addr,buf);
+  DEBUG("FPE RIP=%p RSP=%p\n",
+	(void*) uc->uc_mcontext.gregs[REG_RIP], (void*)  uc->uc_mcontext.gregs[REG_RSP]);
     
-  set_trap_flag_context(uc,1);
+  if (mc->state == AWAIT_FPE) { 
+    clear_fp_exceptions_context(uc);      // exceptions cleared
+    set_mask_fp_exceptions_context(uc,1); // exceptions masked
+    set_trap_flag_context(uc,1);          // traps enabled
+    mc->state = AWAIT_TRAP;
+  } else {
+    clear_fp_exceptions_context(uc);     // exceptions cleared
+    set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_trap_flag_context(uc,0);         // traps disabled
+    abort_operation("Surprise state during sigfpe_handler exec");
+  }
+}
 
-  //orig_fedisableexcept(FE_ALL_EXCEPT);
-  //xs  nop_it(si->si_addr,4);
-    //  abort();
+static int bringup_monitoring_context(int pid)
+{
+  monitoring_context_t *c;
+  char name[80];
+
+  if (!(c = alloc_monitoring_context(pid))) { 
+    ERROR("Cannot allocate monitoring context\n");
+    return -1;
+  }
+
+  sprintf(name,"__%s.%d.%lu.individual.fpemon", program_invocation_short_name, pid, time(0));
+  if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
+    ERROR("Cannot open monitoring output file\n");
+    free_monitoring_context(pid);
+    return -1;
+  }
+
+  DEBUG("fd = %d\n",c->fd);
+  
+  c->state = AWAIT_FPE;
+  c->count = 0;
+
+  return 0;
 }
 
 static int bringup()
@@ -640,6 +484,13 @@ static int bringup()
   }
   orig_feclearexcept(FE_ALL_EXCEPT);
   if (mode==INDIVIDUAL) {
+    init_monitoring_contexts();
+
+    if (bringup_monitoring_context(getpid())) { 
+      ERROR("Failed to start up monitoring context at startup\n");
+      return -1;
+    }
+
     struct sigaction sa;
 
     memset(&sa,0,sizeof(sa));
@@ -686,6 +537,9 @@ static __attribute__((constructor)) void fpe_preload_init(void)
       mode=AGGREGATE;
       DEBUG("No FPE_MODE is given, so assuming AGGREGATE mode\n");
     }
+    if (getenv("FPE_MAXCOUNT")) { 
+      maxcount = atoi(getenv("FPE_MAXCOUNT"));
+    }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");
       return;
@@ -701,15 +555,32 @@ static __attribute__((constructor)) void fpe_preload_init(void)
 static __attribute__((destructor)) void syscall_preload_deinit(void) 
 { 
   // destroy the tracer thread
-  INFO("deinit\n");
+  DEBUG("deinit\n");
   if (inited && !aborted) { 
     if (mode==AGGREGATE) {
-      INFO("FP exceptions seen during run are:\n");
-      show_current_fe_exceptions();
+      char buf[80];
+      int fd;
+      //DEBUG("FP exceptions seen during run are:\n");
+      //show_current_fe_exceptions();
+      sprintf(buf,"__%s.%d.%lu.aggregate.fpemon", program_invocation_short_name, getpid(), time(0));
+      if ((fd = open(buf,O_CREAT | O_WRONLY, 0666)<0)) { 
+	ERROR("Cannot open monitoring output file\n");
+      } else {
+	stringify_current_fe_exceptions(buf);
+	strcat(buf,"\n");
+	write(fd,buf,strlen(buf));
+	close(fd);
+      }
     } else {
-      INFO("Dumping FPE exceptions to file (NOT DONE YET)\n");
+      int i;
+      DEBUG("FPE exceptions previously dumped to files\n");
+      for (i=0;i<MAX_CONTEXTS;i++) { 
+	if (context[i].pid) { 
+	  close(context[i].fd);
+	}
+      }
     }
   }
   inited=0;
-  INFO("done\n");
+  DEBUG("done\n");
 }
