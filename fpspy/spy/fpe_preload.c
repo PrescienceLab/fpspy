@@ -69,7 +69,7 @@
 
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
-volatile static int maxcount=65546; // maximum number to record, per thread
+volatile static int maxcount=65536; // maximum number to record, per thread
 
 volatile enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 
