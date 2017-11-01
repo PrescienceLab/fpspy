@@ -50,8 +50,8 @@
 #include <fcntl.h>
 
 
-#define DEBUG_OUTPUT 0
-#define NO_OUTPUT 1
+#define DEBUG_OUTPUT 1
+#define NO_OUTPUT 0
 
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug: " S, ##__VA_ARGS__)
@@ -69,7 +69,7 @@
 
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
-volatile static int maxcount=65536; // maximum number to record, per thread
+volatile static int maxcount=65546; // maximum number to record, per thread
 
 volatile enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 
@@ -200,11 +200,19 @@ static void show_current_fe_exceptions()
 }
 */
 
+static __attribute__((constructor)) void fpe_preload_init(void);
+
 static void abort_operation(char *reason)
 {
+  if (!inited) {
+    DEBUG("Initializing before abortingi\n");
+    fpe_preload_init();
+    DEBUG("Done with fpe_preload_init()\n");
+  }
+
   if (!aborted) { 
     if (mode==INDIVIDUAL) { 
-      sigaction(SIGFPE,&oldsa_fpe,0);
+      orig_sigaction(SIGFPE,&oldsa_fpe,0);
     }
     aborted = 1;
     DEBUG("Aborted operation because %s\n",reason);
@@ -317,7 +325,7 @@ int feupdateenv(const fenv_t *envp)
     
 static int setup_shims()
 {
-  DEBUG("shim setup\n");
+  DEBUG("shim setup starting\n");
 
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { return -1; }
   if (mode==INDIVIDUAL) {
@@ -338,6 +346,8 @@ static int setup_shims()
   SHIMIFY(feholdexcept);
   SHIMIFY(fesetenv);
   SHIMIFY(feupdateenv);
+
+  DEBUG("shim setup over\n");
   return 0;
 }
 
@@ -492,9 +502,15 @@ static int bringup()
     ERROR("Cannot setup shims\n");
     return -1;
   }
+
+  DEBUG("Going into orig_feclearexcept\n");
   orig_feclearexcept(FE_ALL_EXCEPT);
+  DEBUG("Out of orig_feclearexcept\n");
+
   if (mode==INDIVIDUAL) {
+    DEBUG("Going into init_monitoring_contexts\n");
     init_monitoring_contexts();
+    DEBUG("Going into bringup_monitoring_context\n"); 
 
     if (bringup_monitoring_context(getpid())) { 
       ERROR("Failed to start up monitoring context at startup\n");
@@ -506,18 +522,21 @@ static int bringup()
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
-    
+   
+
+    DEBUG("Going into orig_sigaction for SIGFPE\n");
     orig_sigaction(SIGFPE,&sa,&oldsa_fpe);
 
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
     sa.sa_flags |= SA_SIGINFO;
     
+    DEBUG("Going into orig_sigaction for SIGTRAP\n");
     orig_sigaction(SIGTRAP,&sa,&oldsa_trap);
 
-
+    DEBUG("Going into orig_feenableexcept\n");
     orig_feenableexcept(FE_ALL_EXCEPT);
-
+    DEBUG("Out of origfeenableexcept\n");
   }
   inited=1;
   return 0;
