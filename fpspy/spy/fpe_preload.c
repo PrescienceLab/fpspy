@@ -71,29 +71,38 @@ volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
 volatile static int maxcount=65546; // maximum number to record, per thread
 
-volatile enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
+volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 
-sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
-int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
-int (*orig_feenableexcept)(int) = 0 ;
-int (*orig_fedisableexcept)(int) = 0 ;
-int (*orig_fegetexcept)() = 0 ;
-int (*orig_feclearexcept)(int) = 0 ;
-int (*orig_fegetexceptflag)(fexcept_t *flagp, int excepts) = 0 ;
-int (*orig_feraiseexcept)(int excepts) = 0; 
-int (*orig_fesetexceptflag)(const fexcept_t *flagp, int excepts) = 0;
-int (*orig_fetestexcept)(int excepts) = 0;
-int (*orig_fegetround)(void) = 0;
-int (*orig_fesetround)(int rounding_mode) = 0;
-int (*orig_fegetenv)(fenv_t *envp) = 0;
-int (*orig_feholdexcept)(fenv_t *envp) = 0;
-int (*orig_fesetenv)(const fenv_t *envp) = 0;
-int (*orig_feupdateenv)(const fenv_t *envp) = 0;
+static sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
+static int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
+static int (*orig_feenableexcept)(int) = 0 ;
+static int (*orig_fedisableexcept)(int) = 0 ;
+static int (*orig_fegetexcept)() = 0 ;
+static int (*orig_feclearexcept)(int) = 0 ;
+static int (*orig_fegetexceptflag)(fexcept_t *flagp, int excepts) = 0 ;
+static int (*orig_feraiseexcept)(int excepts) = 0; 
+static int (*orig_fesetexceptflag)(const fexcept_t *flagp, int excepts) = 0;
+static int (*orig_fetestexcept)(int excepts) = 0;
+static int (*orig_fegetround)(void) = 0;
+static int (*orig_fesetround)(int rounding_mode) = 0;
+static int (*orig_fegetenv)(fenv_t *envp) = 0;
+static int (*orig_feholdexcept)(fenv_t *envp) = 0;
+static int (*orig_fesetenv)(const fenv_t *envp) = 0;
+static int (*orig_feupdateenv)(const fenv_t *envp) = 0;
 
 static struct sigaction oldsa_fpe, oldsa_trap;
 
+
+#define ORIG_RETURN(func,...) if (orig_##func) { return orig_##func(__VA_ARGS__); } else { ERROR("cannot call orig_" #func " returning zero\n"); return 0; }
+#define ORIG_IF_CAN(func,...) if (orig_##func) { orig_##func(__VA_ARGS__); } else { DEBUG("cannot call orig_" #func " - skipping\n"); }
+//#define SHOW_CALL_STACK() DEBUG("callstack (3 deep) : %p -> %p -> %p\n", __builtin_return_address(3), __builtin_return_address(2), __builtin_return_address(1))
+//#define SHOW_CALL_STACK() DEBUG("callstack (2 deep) : %p -> %p\n", __builtin_return_address(2), __builtin_return_address(1))
+//#define SHOW_CALL_STACK() DEBUG("callstack (1 deep) : %p\n", __builtin_return_address(1))
+#define SHOW_CALL_STACK()
+
 #define MAX_CONTEXTS 10
 
+// all bits set indicates an abort
 struct individual_record {
   void    *rip;
   void    *rsp;
@@ -200,6 +209,25 @@ static void show_current_fe_exceptions()
 }
 */
 
+static int writeall(int fd, void *buf, int len)
+{
+  int n;
+  int left = len;
+
+  do {
+    n = write(fd,buf,left);
+    if (n<0) {
+      return -1;
+    }
+    left -= n;
+    buf += n;
+  } while (left>0);
+  
+  return 0;
+}
+
+
+
 static __attribute__((constructor)) void fpe_preload_init(void);
 
 static void abort_operation(char *reason)
@@ -211,9 +239,29 @@ static void abort_operation(char *reason)
   }
 
   if (!aborted) { 
-    if (mode==INDIVIDUAL) { 
-      orig_sigaction(SIGFPE,&oldsa_fpe,0);
+    ORIG_IF_CAN(fedisableexcept,FE_ALL_EXCEPT);
+    ORIG_IF_CAN(feclearexcept,FE_ALL_EXCEPT);
+    ORIG_IF_CAN(sigaction,SIGFPE,&oldsa_fpe,0);
+    ORIG_IF_CAN(sigaction,SIGTRAP,&oldsa_trap,0);
+
+    if (mode==INDIVIDUAL) {
+
+      monitoring_context_t *mc = find_monitoring_context(getpid());
+
+      if (!mc) {
+	ERROR("Cannot find monitoring context to write abort record\n");
+      } else {
+
+	// write an abort record
+	struct individual_record r;
+	memset(&r,0xff,sizeof(r));
+	
+	if (writeall(mc->fd,&r,sizeof(r))) {
+	  ERROR("Failed to write abort record\n");
+	}
+      }
     }
+    
     aborted = 1;
     DEBUG("Aborted operation because %s\n",reason);
   }
@@ -221,117 +269,146 @@ static void abort_operation(char *reason)
 
 sighandler_t signal(int sig, sighandler_t func)
 {
-  if (sig==SIGFPE) { 
-    abort_operation("target is using signal with SIGFPE");
+  DEBUG("signal(%d,%p)\n",sig,func);
+  SHOW_CALL_STACK();
+  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) { 
+    abort_operation("target is using signal with SIGFPE or SIGTRAP");
   }
-  return orig_signal(sig,func);
+  ORIG_RETURN(signal,sig,func);
 }
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
-  if (sig==SIGFPE) { 
-    abort_operation("target is using sigaction with SIGFPE");
+  DEBUG("sigaction(%d,%p,%p)\n",sig,act,oldact);
+  SHOW_CALL_STACK();
+  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL) { 
+    abort_operation("target is using sigaction with SIGFPE or SIGTRAP");
   }
-  return orig_sigaction(sig,act,oldact);
+  ORIG_RETURN(sigaction,sig,act,oldact)
 }
 
 
 int feclearexcept(int excepts)
 {
+  DEBUG("feclearexcept(0x%x)\n",excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using feclearexcept");
-  return orig_feclearexcept(excepts);
+  ORIG_RETURN(feclearexcept,excepts);
 }
 
 int feenableexcept(int excepts)
 {
+  DEBUG("feenableexcept(0x%x)\n",excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using feenableexcept");
-  return orig_feenableexcept(excepts);
+  ORIG_RETURN(feenableexcept,excepts);
 }
 
 int fedisableexcept(int excepts)
 {
+  DEBUG("fedisableexcept(0x%x)\n",excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using fedisableexcept");
-  return orig_fedisableexcept(excepts);
+  ORIG_RETURN(fedisableexcept,excepts);
 }
 
 int fegetexcept(void)
 {
+  DEBUG("fegetexcept()\n");
+  SHOW_CALL_STACK();
   abort_operation("target is using fegetexcept");
-  return orig_fegetexcept();
+  ORIG_RETURN(fegetexcept);
 }
 
 int fegetexceptflag(fexcept_t *flagp, int excepts)
 {
+  DEBUG("fegetexceptflag(%p,0x%x)\n",flagp,excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using fegetexceptflag");
-  return orig_fegetexceptflag(flagp, excepts);
+  ORIG_RETURN(fegetexceptflag, flagp, excepts);
 }
 
 int feraiseexcept(int excepts) 
 {
+  DEBUG("feraiseexcept(0x%x)\n",excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using feraiseexcept");
-  return orig_feraiseexcept(excepts);
+  ORIG_RETURN(feraiseexcept,excepts);
 }
 
 int fesetexceptflag(const fexcept_t *flagp, int excepts)
 {
+  DEBUG("fesetexceptflag(%p,0x%x\n",flagp,excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using fesetexceptflag");
-  return orig_fesetexceptflag(flagp, excepts);
+  ORIG_RETURN(fesetexceptflag, flagp, excepts);
 }
 
 int fetestexcept(int excepts)
 {
+  DEBUG("fesetexcept(0x%x)\n",excepts);
+  SHOW_CALL_STACK();
   abort_operation("target is using fetestexcept");
-  return orig_fetestexcept(excepts);
+  ORIG_RETURN(fetestexcept, excepts);
 }
 
 int fegetround(void)
 {
+  DEBUG("fegetround()\n");
+  SHOW_CALL_STACK();
   abort_operation("target is using fegetround");
-  return orig_fegetround();
+  ORIG_RETURN(fegetround);
 }
 
 int fesetround(int rounding_mode)
 {
+  DEBUG("fesetround(0x%x)\n",mode);
+  SHOW_CALL_STACK();
   abort_operation("target is using fesetround");
-  return orig_fesetround(rounding_mode);
+  ORIG_RETURN(fesetround,rounding_mode);
 }
 
 int fegetenv(fenv_t *envp)
 {
+  DEBUG("fegetenv(%p)\n",envp);
+  SHOW_CALL_STACK();
   abort_operation("target is using fegetenv");
-  return orig_fegetenv(envp);
+  ORIG_RETURN(fegetenv,envp);
 
 }
 
 int feholdexcept(fenv_t *envp)
 {
+  DEBUG("feholdexcept(%p)\n",envp);
+  SHOW_CALL_STACK();
   abort_operation("target is using feholdexcept");
-  return orig_feholdexcept(envp);
+  ORIG_RETURN(feholdexcept,envp);
 }
 
 
 int fesetenv(const fenv_t *envp)
 {
+  DEBUG("fesetenv(%p)\n",envp);
+  SHOW_CALL_STACK();
   abort_operation("target is using fesetenv");
-  return orig_fesetenv(envp);
+  ORIG_RETURN(fesetenv,envp);
 }
 
 int feupdateenv(const fenv_t *envp)
 {
+  DEBUG("feupdateenv(%p)\n",envp);
+  SHOW_CALL_STACK();
   abort_operation("target is using feupdateenv");
-  return orig_feupdateenv(envp);
+  ORIG_RETURN(feupdateenv,envp);
 }
 
     
 static int setup_shims()
 {
-  DEBUG("shim setup starting\n");
+#define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { DEBUG("Failed to setup SHIM for " #x "\n");  return -1; }
 
-#define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { return -1; }
-  if (mode==INDIVIDUAL) {
-    SHIMIFY(signal);
-    SHIMIFY(sigaction);
-  }
+  SHIMIFY(signal);
+  SHIMIFY(sigaction);
   SHIMIFY(feclearexcept);
   SHIMIFY(feenableexcept);
   SHIMIFY(fedisableexcept);
@@ -347,7 +424,6 @@ static int setup_shims()
   SHIMIFY(fesetenv);
   SHIMIFY(feupdateenv);
 
-  DEBUG("shim setup over\n");
   return 0;
 }
 
@@ -411,6 +487,8 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   }
 }
 
+
+
 static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(getpid());
@@ -433,7 +511,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   memcpy(r.instruction,r.rip,15);
   r.pad = 0;
 
-  if (write(mc->fd,&r,sizeof(r))!=sizeof(r)) { 
+  if (writeall(mc->fd,&r,sizeof(r))) {
     ERROR("Failed to write record\n");
   }
 
@@ -503,14 +581,11 @@ static int bringup()
     return -1;
   }
 
-  DEBUG("Going into orig_feclearexcept\n");
-  orig_feclearexcept(FE_ALL_EXCEPT);
-  DEBUG("Out of orig_feclearexcept\n");
+  ORIG_IF_CAN(feclearexcept,FE_ALL_EXCEPT);
 
   if (mode==INDIVIDUAL) {
-    DEBUG("Going into init_monitoring_contexts\n");
+    
     init_monitoring_contexts();
-    DEBUG("Going into bringup_monitoring_context\n"); 
 
     if (bringup_monitoring_context(getpid())) { 
       ERROR("Failed to start up monitoring context at startup\n");
@@ -523,22 +598,18 @@ static int bringup()
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
    
-
-    DEBUG("Going into orig_sigaction for SIGFPE\n");
-    orig_sigaction(SIGFPE,&sa,&oldsa_fpe);
+    ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
 
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
     sa.sa_flags |= SA_SIGINFO;
     
-    DEBUG("Going into orig_sigaction for SIGTRAP\n");
-    orig_sigaction(SIGTRAP,&sa,&oldsa_trap);
+    ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
-    DEBUG("Going into orig_feenableexcept\n");
-    orig_feenableexcept(FE_ALL_EXCEPT);
-    DEBUG("Out of origfeenableexcept\n");
+    ORIG_IF_CAN(feenableexcept,FE_ALL_EXCEPT);
   }
   inited=1;
+  DEBUG("Done with setup\n");
   return 0;
 }
 
@@ -580,12 +651,14 @@ static __attribute__((constructor)) void fpe_preload_init(void)
   }
 }
 
+
+    
 // Called on unload of preload library
-static __attribute__((destructor)) void syscall_preload_deinit(void) 
+static __attribute__((destructor)) void fpe_preload_deinit(void) 
 { 
   // destroy the tracer thread
   DEBUG("deinit\n");
-  if (inited && !aborted) { 
+  if (inited) { 
     if (mode==AGGREGATE) {
       char buf[80];
       int fd;
@@ -595,9 +668,15 @@ static __attribute__((destructor)) void syscall_preload_deinit(void)
       if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
 	ERROR("Cannot open monitoring output file\n");
       } else {
-	stringify_current_fe_exceptions(buf);
-	strcat(buf,"\n");
-	write(fd,buf,strlen(buf));
+	if (!aborted) { 
+	  stringify_current_fe_exceptions(buf);
+	  strcat(buf,"\n");
+	} else {
+	  strcpy(buf,"ABORTED\n");
+	}
+	if (writeall(fd,buf,strlen(buf))) {
+	  ERROR("Failed to write all of monitoring output\n");
+	}
 	close(fd);
       }
     } else {

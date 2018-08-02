@@ -9,7 +9,8 @@ $#ARGV==0 or die "usage: parse_individual.pl file\n";
 	    5 => "FPE_FLTUND",
 	    6 => "FPE_FLTRES",
 	    7 => "FPE_FLTINV",
-	    8 => "FPE_FLTSUB");
+	    8 => "FPE_FLTSUB",
+            0xffffffff => "***ABORT!!");
 
 $file = shift;
 
@@ -28,6 +29,7 @@ while (1) {
     if (!defined($dec)) { 
 	$dec = "UNDEF"
     }
+
     print sprintf("%s\t%016x\t%016x\t%08x\t%08x\t",$dec, $rip,$rsp,$code,$mxcsr);
     print unpack("H*",$instr), "\n";
 }

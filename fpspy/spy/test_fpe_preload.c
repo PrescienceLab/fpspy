@@ -9,6 +9,11 @@
 #include <math.h>
 #include <stdio.h>
 
+double foo(double x)
+{
+  return sin(x);
+} 
+
 void divzero()
 {
   volatile double x,y,z;
