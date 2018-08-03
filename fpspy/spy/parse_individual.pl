@@ -23,7 +23,7 @@ while (1) {
     ($rip, $rsp, $code, $mxcsr) = unpack("QQLL",$rec);
     $n = read(RAW,$instr, 15);
     last if ($n!=15);
-    $n = read(RAW,$junk, 1);
+    $n = read(RAW,$junk, 1); undef($junk);
     last if ($n!=1);
     $dec = $decode{$code};
     if (!defined($dec)) { 

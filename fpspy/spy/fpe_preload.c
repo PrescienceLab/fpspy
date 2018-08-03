@@ -27,6 +27,11 @@
     approach of, on exception, disabling exceptions, switching to trap mode, then
     restarting the instruction, then fauling on trap at the next instruction, then
     switching exceptions back on and switching traps off
+
+  Additionally, you can operate in "aggressive" mode (for individual mode), which
+  means that it will not get out of the way if the target program sets a SIGFPE signal;
+  instead, the target program will just never see any of its own SIGFPEs.
+
 */
 
 #define _GNU_SOURCE
@@ -47,11 +52,12 @@
 #include <sched.h>
 #include <signal.h>
 #include <time.h>
+#include <ctype.h>
 #include <fcntl.h>
+#include <ucontext.h>
 
-
-#define DEBUG_OUTPUT 1
-#define NO_OUTPUT 0
+#define DEBUG_OUTPUT 0
+#define NO_OUTPUT 1
 
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug: " S, ##__VA_ARGS__)
@@ -72,6 +78,7 @@ volatile static int aborted=0; // set if the target is doing its own FPE process
 volatile static int maxcount=65546; // maximum number to record, per thread
 
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
+volatile static int aggressive = 0;
 
 static sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
 static int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
@@ -90,11 +97,11 @@ static int (*orig_feholdexcept)(fenv_t *envp) = 0;
 static int (*orig_fesetenv)(const fenv_t *envp) = 0;
 static int (*orig_feupdateenv)(const fenv_t *envp) = 0;
 
-static struct sigaction oldsa_fpe, oldsa_trap;
+static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
 
 
 #define ORIG_RETURN(func,...) if (orig_##func) { return orig_##func(__VA_ARGS__); } else { ERROR("cannot call orig_" #func " returning zero\n"); return 0; }
-#define ORIG_IF_CAN(func,...) if (orig_##func) { orig_##func(__VA_ARGS__); } else { DEBUG("cannot call orig_" #func " - skipping\n"); }
+#define ORIG_IF_CAN(func,...) if (orig_##func) { if (!DEBUG_OUTPUT) { orig_##func(__VA_ARGS__); } else { DEBUG("orig_"#func" returns 0x%x\n",orig_##func(__VA_ARGS__)); } } else { DEBUG("cannot call orig_" #func " - skipping\n"); }
 //#define SHOW_CALL_STACK() DEBUG("callstack (3 deep) : %p -> %p -> %p\n", __builtin_return_address(3), __builtin_return_address(2), __builtin_return_address(1))
 //#define SHOW_CALL_STACK() DEBUG("callstack (2 deep) : %p -> %p\n", __builtin_return_address(2), __builtin_return_address(1))
 //#define SHOW_CALL_STACK() DEBUG("callstack (1 deep) : %p\n", __builtin_return_address(1))
@@ -118,10 +125,11 @@ typedef struct individual_record individual_record_t;
 // This is to allow us to handle multiple threads 
 // and to follow forks later
 typedef struct monitoring_context {
-  enum {AWAIT_FPE, AWAIT_TRAP} state;
+  enum {AWAIT_FPE, AWAIT_TRAP, ABORT} state;
+  int aborting_in_trap;
   int pid;
   int fd; 
-  int count;
+  uint64_t count;
 } monitoring_context_t;
 
 static int  context_lock;
@@ -190,14 +198,18 @@ static void free_monitoring_context(int pid)
 
 static void stringify_current_fe_exceptions(char *buf)
 {
+  int have=0;
   buf[0]=0;
 
-#define FE_HANDLE(x) if (orig_fetestexcept(x)) { strcat(buf," " #x ); }
+#define FE_HANDLE(x) if (orig_fetestexcept(x)) { if (!have) { strcat(buf,#x); have=1; } else {strcat(buf," " #x ); } }
   FE_HANDLE(FE_DIVBYZERO);
   FE_HANDLE(FE_INEXACT);
   FE_HANDLE(FE_INVALID);
   FE_HANDLE(FE_OVERFLOW);
   FE_HANDLE(FE_UNDERFLOW);
+  if (!have) {
+    strcpy(buf,"NO_EXCEPTIONS_RECORDED");
+  }
 }
 
 /*
@@ -230,6 +242,31 @@ static int writeall(int fd, void *buf, int len)
 
 static __attribute__((constructor)) void fpe_preload_init(void);
 
+
+inline void set_trap_flag_context(ucontext_t *uc, int val)
+{
+  if (val) {
+    uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL; 
+  } else {
+    uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL; 
+  }
+}
+
+
+inline void clear_fp_exceptions_context(ucontext_t *uc)
+{
+  uc->uc_mcontext.fpregs->mxcsr &= ~0x3f; 
+}
+
+inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
+{
+  if (mask) {
+    uc->uc_mcontext.fpregs->mxcsr |= 0x1f80;
+  } else {
+    uc->uc_mcontext.fpregs->mxcsr &= ~0x1f80;
+  }
+}
+
 static void abort_operation(char *reason)
 {
   if (!inited) {
@@ -238,11 +275,10 @@ static void abort_operation(char *reason)
     DEBUG("Done with fpe_preload_init()\n");
   }
 
-  if (!aborted) { 
+  if (!aborted) {
     ORIG_IF_CAN(fedisableexcept,FE_ALL_EXCEPT);
     ORIG_IF_CAN(feclearexcept,FE_ALL_EXCEPT);
     ORIG_IF_CAN(sigaction,SIGFPE,&oldsa_fpe,0);
-    ORIG_IF_CAN(sigaction,SIGTRAP,&oldsa_trap,0);
 
     if (mode==INDIVIDUAL) {
 
@@ -251,7 +287,9 @@ static void abort_operation(char *reason)
       if (!mc) {
 	ERROR("Cannot find monitoring context to write abort record\n");
       } else {
-
+	
+	mc->state = ABORT;
+	
 	// write an abort record
 	struct individual_record r;
 	memset(&r,0xff,sizeof(r));
@@ -259,8 +297,17 @@ static void abort_operation(char *reason)
 	if (writeall(mc->fd,&r,sizeof(r))) {
 	  ERROR("Failed to write abort record\n");
 	}
+	
+	// if we are aborting in a trap, the mcontext has already been restored
+	if (!mc->aborting_in_trap) {
+	  // signal ourselves to restore the FP and TRAP state in the context
+	  kill(getpid(),SIGTRAP);
+	}
       }
     }
+
+    // finally remove our trap handler
+    ORIG_IF_CAN(sigaction,SIGTRAP,&oldsa_trap,0);
     
     aborted = 1;
     DEBUG("Aborted operation because %s\n",reason);
@@ -271,8 +318,14 @@ sighandler_t signal(int sig, sighandler_t func)
 {
   DEBUG("signal(%d,%p)\n",sig,func);
   SHOW_CALL_STACK();
-  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) { 
-    abort_operation("target is using signal with SIGFPE or SIGTRAP");
+  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
+    if (!aggressive) { 
+      abort_operation("target is using sigaction with SIGFPE or SIGTRAP (nonaggressive)");
+    } else {
+      // do not override our signal handlers - we are not aborting
+      DEBUG("not overriding SIGFPE or SIGTRAP because we are in aggressive mode\n");
+      return 0;
+    }
   }
   ORIG_RETURN(signal,sig,func);
 }
@@ -281,10 +334,16 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
   DEBUG("sigaction(%d,%p,%p)\n",sig,act,oldact);
   SHOW_CALL_STACK();
-  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL) { 
-    abort_operation("target is using sigaction with SIGFPE or SIGTRAP");
+  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
+    if (!aggressive) { 
+      abort_operation("target is using sigaction with SIGFPE or SIGTRAP");
+    } else {
+      // do not override our signal handlers - we are not aborting
+      DEBUG("not overriding SIGFPE or SIGTRAP because we are in aggressive mode\n");
+      return 0;
+    }
   }
-  ORIG_RETURN(sigaction,sig,act,oldact)
+  ORIG_RETURN(sigaction,sig,act,oldact);
 }
 
 
@@ -428,40 +487,22 @@ static int setup_shims()
 }
 
 
-inline void set_trap_flag_context(ucontext_t *uc, int val)
-{
-  if (val) {
-    uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL; 
-  } else {
-    uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL; 
-  }
-}
-
-
-inline void clear_fp_exceptions_context(ucontext_t *uc)
-{
-  uc->uc_mcontext.fpregs->mxcsr &= ~0x3f; 
-}
-
-inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
-{
-  if (mask) {
-    uc->uc_mcontext.fpregs->mxcsr |= 0x1f80;
-  } else {
-    uc->uc_mcontext.fpregs->mxcsr &= ~0x1f80;
-  }
-}
 
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(getpid());
   ucontext_t *uc = (ucontext_t *)priv;
 
-  if (!mc) { 
+  if (!mc || mc->state==ABORT) { 
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
     set_trap_flag_context(uc,0);         // traps disabled
-    abort_operation("Cannot find monitoring context during sigtrap_handler exec");
+    if (!mc) {
+      // this may end badly
+      abort_operation("Cannot find monitoring context during sigtrap_handler exec");
+    } else {
+      DEBUG("FP and TRAP mcontext restored on abort\n");
+    }
     return;
   }
 
@@ -483,6 +524,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
     set_trap_flag_context(uc,0);         // traps disabled
+    mc->aborting_in_trap = 1;
     abort_operation("Surprise state during sigtrap_handler exec");
   }
 }
@@ -551,6 +593,26 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   }
 }
 
+static __attribute__((destructor)) void fpe_preload_deinit(void);
+
+
+static void sigint_handler(int sig, siginfo_t *si,  void *priv)
+{
+
+  DEBUG("Handling break\n");
+
+
+  if (oldsa_int.sa_sigaction) { 
+    fpe_preload_deinit(); // dump everything out
+    // invoke underlying handler
+    oldsa_int.sa_sigaction(sig,si,priv);
+  } else {
+    // exit - our deinit will be called
+    exit(-1);
+  }
+}
+  
+
 static int bringup_monitoring_context(int pid)
 {
   monitoring_context_t *c;
@@ -569,11 +631,13 @@ static int bringup_monitoring_context(int pid)
   }
 
   c->state = AWAIT_FPE;
+  c->aborting_in_trap = 0;
   c->count = 0;
 
   return 0;
 }
 
+ 
 static int bringup()
 {
   if (setup_shims()) { 
@@ -606,6 +670,12 @@ static int bringup()
     
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
+    memset(&sa,0,sizeof(sa));
+    sa.sa_sigaction = sigint_handler;
+    sa.sa_flags |= SA_SIGINFO;
+    
+    ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
+    
     ORIG_IF_CAN(feenableexcept,FE_ALL_EXCEPT);
   }
   inited=1;
@@ -639,6 +709,10 @@ static __attribute__((constructor)) void fpe_preload_init(void)
     }
     if (getenv("FPE_MAXCOUNT")) { 
       maxcount = atoi(getenv("FPE_MAXCOUNT"));
+    }
+    if (getenv("FPE_AGGRESSIVE") && tolower(getenv("FPE_AGGRESSIVE")[0])=='y') {
+      DEBUG("Setting AGGRESSIVE\n");
+      aggressive=1;
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");

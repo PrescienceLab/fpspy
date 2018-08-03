@@ -7,7 +7,11 @@
 */
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include <signal.h>
+#define __GNU_SOURCE
+#include <fenv.h>
 
 double foo(double x)
 {
@@ -101,14 +105,35 @@ void inexact()
   printf("%.18le - %.18le = %.18le\n", x,y,z);
 }  
 
+void handler(int sig)
+{
+  printf("Caught my own signal %d and am exiting\n",sig);
+  exit(0);
+}
+
 int main()
 {
   printf("Hello from test_fpe_preload\n");
+  
   divzero();
   nanny();
-  denorm(); 
+  denorm();
+
+  // if we abort here, we should have some partial output in the logs
+  
+  if (getenv("TEST_FPE_BREAK_GENERAL_SIGNAL")) {
+    signal(SIGUSR1,handler);
+  }
+  if (getenv("TEST_FPE_BREAK_FPE_SIGNAL")) {
+    signal(SIGFPE,handler);
+  }
+  if (getenv("TEST_FPE_BREAK_FE_FUNC")) {
+    feclearexcept(FE_ALL_EXCEPT);
+  }
+
   underflow();
   overflow();
   inexact();
+
   return 0;
 }
