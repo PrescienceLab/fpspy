@@ -22,5 +22,49 @@ The code has two modes of operation:
   is sticky, this will let us know if the program had 1 or more 
   occurances of each of the possible exceptions
 - Individual mode captures individual floating point exceptions, 
-  emulating the instructions that cause them (NOT COMPLETE)
+  emulating the instructions that cause them.
+
+
+The code can be run against a dynamically linked binary which crosses
+the shared library boundary for the fe* library calls, which
+manipulate the FPU behavior, and for the signal and sigaction system
+calls.
+
+To run against a binary:
+
+LD_PRELOAD=fpe_preload.so [FPE_MODE=<mode>] [FPE_AGGRESSIVE=<yes|no>] exec.exe
+
+The modes are "aggregate" and "individual" as noted above.   If no
+mode is given, aggregate mode is assumed.   
+
+Generally, fpe_preload gets out of the way if the executable itself
+attempts to manipulate the FPU signaling state via the fe* and
+signal/sigaction system calls.  By default, it is very sensitive to
+this. If FPE_AGGRESSIVE is set, then it is less sensitive, which means
+that more can be captured, but the execution is more likely to be
+broken.
+
+Additional environment variables
+
+FPE_SAMPLE=k
+   means that only every kth exception will be recorded
+   this only affects individual mode
+
+FPE_EXCEPT_LIST=list
+   means that only the listed exceptions will be intercepted
+   this only affects individual mode
+   the comma-delimited list can include:
+        invalid (NAN)
+	denorm
+	divide (divide by zero)
+	overflow
+	underflow
+	precision (rounding)
+	
+                    
+
+Work in progress
+
+- time-based sampling and poisson sampling model
+- following fork/clone
 

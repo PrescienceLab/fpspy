@@ -76,6 +76,12 @@
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
 volatile static int maxcount=65546; // maximum number to record, per thread
+volatile static int sample_period=1; // 1 = capture every one
+volatile static int exceptmask=FE_ALL_EXCEPT; // which C99 exceptions to handle, default all
+volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, default all (using base zero)
+
+#define MXCSR_FLAG_MASK (mxcsrmask_base<<0)
+#define MXCSR_MASK_MASK (mxcsrmask_base<<7)
 
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 volatile static int aggressive = 0;
@@ -111,6 +117,7 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
 
 // all bits set indicates an abort
 struct individual_record {
+  uint64_t time; // cycles from start of monitoring
   void    *rip;
   void    *rsp;
   int      code;  // as in siginfo_t->si_code
@@ -122,10 +129,20 @@ struct individual_record {
 typedef struct individual_record individual_record_t;
 
 
+
+static inline uint64_t __attribute__((always_inline)) rdtsc(void)
+{
+  uint32_t lo, hi;
+  asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return lo | ((uint64_t)(hi) << 32);
+}
+
+
 // This is to allow us to handle multiple threads 
 // and to follow forks later
 typedef struct monitoring_context {
-  enum {AWAIT_FPE, AWAIT_TRAP, ABORT} state;
+  uint64_t start_time; // cycles when context created
+  enum {INIT, AWAIT_FPE, AWAIT_TRAP, ABORT} state;
   int aborting_in_trap;
   int pid;
   int fd; 
@@ -243,7 +260,7 @@ static int writeall(int fd, void *buf, int len)
 static __attribute__((constructor)) void fpe_preload_init(void);
 
 
-inline void set_trap_flag_context(ucontext_t *uc, int val)
+static inline void set_trap_flag_context(ucontext_t *uc, int val)
 {
   if (val) {
     uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL; 
@@ -253,17 +270,17 @@ inline void set_trap_flag_context(ucontext_t *uc, int val)
 }
 
 
-inline void clear_fp_exceptions_context(ucontext_t *uc)
+static inline void clear_fp_exceptions_context(ucontext_t *uc)
 {
-  uc->uc_mcontext.fpregs->mxcsr &= ~0x3f; 
+  uc->uc_mcontext.fpregs->mxcsr &= ~MXCSR_FLAG_MASK; 
 }
 
-inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
+static inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
 {
   if (mask) {
-    uc->uc_mcontext.fpregs->mxcsr |= 0x1f80;
+    uc->uc_mcontext.fpregs->mxcsr |= MXCSR_MASK_MASK;
   } else {
-    uc->uc_mcontext.fpregs->mxcsr &= ~0x1f80;
+    uc->uc_mcontext.fpregs->mxcsr &= ~MXCSR_MASK_MASK;
   }
 }
 
@@ -289,10 +306,12 @@ static void abort_operation(char *reason)
       } else {
 	
 	mc->state = ABORT;
-	
+
 	// write an abort record
 	struct individual_record r;
 	memset(&r,0xff,sizeof(r));
+
+	r.time = rdtsc() - mc->start_time;
 	
 	if (writeall(mc->fd,&r,sizeof(r))) {
 	  ERROR("Failed to write abort record\n");
@@ -506,6 +525,15 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     return;
   }
 
+  if (mc && mc->state==INIT) {
+    clear_fp_exceptions_context(uc);     // exceptions cleared
+    set_mask_fp_exceptions_context(uc,0);// exceptions unmasked
+    set_trap_flag_context(uc,0);         // traps disabled
+    mc->state = AWAIT_FPE;
+    DEBUG("MXCSR state initialized\n");
+    return;
+  }
+  
   DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
 	si->si_signo, si->si_errno, si->si_code, si->si_addr);
 
@@ -544,19 +572,22 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     return;
   }
 
-  individual_record_t r;  
-  
-  r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
-  r.rsp = (void*) uc->uc_mcontext.gregs[REG_RSP];
-  r.code =  si->si_code;
-  r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
-  memcpy(r.instruction,r.rip,15);
-  r.pad = 0;
+  if (!(mc->count % sample_period)) { 
+    individual_record_t r;  
 
-  if (writeall(mc->fd,&r,sizeof(r))) {
-    ERROR("Failed to write record\n");
+    r.time = rdtsc() - mc->start_time;
+    r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
+    r.rsp = (void*) uc->uc_mcontext.gregs[REG_RSP];
+    r.code =  si->si_code;
+    r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
+    memcpy(r.instruction,r.rip,15);
+    r.pad = 0;
+    
+    if (writeall(mc->fd,&r,sizeof(r))) {
+      ERROR("Failed to write record\n");
+    }
   }
-
+  
 #if DEBUG_OUTPUT
   char buf[80];
 #define CASE(X) case X : strcpy(buf, #X); break; 
@@ -630,7 +661,8 @@ static int bringup_monitoring_context(int pid)
     return -1;
   }
 
-  c->state = AWAIT_FPE;
+  c->start_time = rdtsc();
+  c->state = INIT;
   c->aborting_in_trap = 0;
   c->count = 0;
 
@@ -645,7 +677,7 @@ static int bringup()
     return -1;
   }
 
-  ORIG_IF_CAN(feclearexcept,FE_ALL_EXCEPT);
+  ORIG_IF_CAN(feclearexcept,exceptmask);
 
   if (mode==INDIVIDUAL) {
     
@@ -676,12 +708,63 @@ static int bringup()
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
     
-    ORIG_IF_CAN(feenableexcept,FE_ALL_EXCEPT);
+    ORIG_IF_CAN(feenableexcept,exceptmask);
+
+    // now kick ourselves to set the sse bits; we are currently in state INIT
+
+    kill(getpid(),SIGTRAP);
+    
   }
   inited=1;
   DEBUG("Done with setup\n");
   return 0;
 }
+
+// 
+
+static void config_exceptions(char *buf)
+{
+  if (mode==AGGREGATE) {
+    DEBUG("ignoring exception list for aggregate mode\n");
+    return ;
+  }
+  
+  exceptmask = 0;
+  mxcsrmask_base = 0;
+  
+  if (strcasestr(buf,"inv")) {
+    DEBUG("tracking INVALID\n");
+    exceptmask |= FE_INVALID ;
+    mxcsrmask_base |= 0x1;
+  }
+  if (strcasestr(buf,"den")) {
+    DEBUG("tracking DENORM\n");
+    exceptmask |= 0 ; // not provided...  
+    mxcsrmask_base |= 0x2;
+  }
+  if (strcasestr(buf,"div")) {
+    DEBUG("tracking DIVIDE_BY_ZERO\n");
+    exceptmask |= FE_DIVBYZERO ;
+    mxcsrmask_base |= 0x4;
+  }
+  if (strcasestr(buf,"over")) {
+    DEBUG("tracking OVERFLOW\n");
+    exceptmask |= FE_OVERFLOW;
+    mxcsrmask_base |= 0x8;
+  }
+  if (strcasestr(buf,"under")) {
+    DEBUG("tracking UNDERFLOW\n");
+    exceptmask |= FE_UNDERFLOW ;
+    mxcsrmask_base |= 0x10;
+  }
+  if (strcasestr(buf,"prec")) {
+    DEBUG("tracking PRECISION\n");
+    exceptmask |= FE_INEXACT ;
+    mxcsrmask_base |= 0x20;
+  }
+
+}
+
 
 
 // Called on load of preload library
@@ -713,6 +796,13 @@ static __attribute__((constructor)) void fpe_preload_init(void)
     if (getenv("FPE_AGGRESSIVE") && tolower(getenv("FPE_AGGRESSIVE")[0])=='y') {
       DEBUG("Setting AGGRESSIVE\n");
       aggressive=1;
+    }
+    if (getenv("FPE_SAMPLE")) {
+      sample_period = atoi(getenv("FPE_SAMPLE"));
+      DEBUG("Setting sample period to %d\n", sample_period);
+    }
+    if (getenv("FPE_EXCEPT_LIST")) {
+      config_exceptions(getenv("FPE_EXCEPT_LIST"));
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");
@@ -751,6 +841,7 @@ static __attribute__((destructor)) void fpe_preload_deinit(void)
 	if (writeall(fd,buf,strlen(buf))) {
 	  ERROR("Failed to write all of monitoring output\n");
 	}
+	DEBUG("aggregate exception string: %s",buf);
 	close(fd);
       }
     } else {
