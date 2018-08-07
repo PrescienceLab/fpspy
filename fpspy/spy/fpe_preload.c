@@ -70,6 +70,7 @@
 
 #include "trace_record.h"
 
+#include <sys/time.h>
 
 #define DEBUG_OUTPUT 1
 #define NO_OUTPUT 0
@@ -121,7 +122,8 @@ static int (*orig_feholdexcept)(fenv_t *envp) = 0;
 static int (*orig_fesetenv)(const fenv_t *envp) = 0;
 static int (*orig_feupdateenv)(const fenv_t *envp) = 0;
 
-static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
+
+static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int, oldsa_alrm;
 
 
 #define ORIG_RETURN(func,...) if (orig_##func) { return orig_##func(__VA_ARGS__); } else { ERROR("cannot call orig_" #func " returning zero\n"); return 0; }
@@ -132,8 +134,6 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
 #define SHOW_CALL_STACK()
 
 #define MAX_CONTEXTS 1024
-
-
 
 
 static inline uint64_t __attribute__((always_inline)) rdtsc(void)
@@ -222,6 +222,29 @@ static void free_monitoring_context(int tid)
   unlock_contexts();
 }
 
+typedef struct fpe_state {
+  enum {ON, OFF} state;
+  struct itimerval it;
+} fpe_state_t;
+
+#define TIME 5
+static fpe_state_t fs; // Struct to hold fpe state
+
+static void init_fpe_state(void) {
+  fs = (fpe_state_t){
+    .state = ON,
+    .it = {
+      .it_value = {
+	.tv_sec = TIME,
+	.tv_usec = 0,
+      },
+      .it_interval = {
+	.tv_sec = TIME,
+	.tv_usec = 0,
+      },
+    }
+  };
+}
 
 
 static void stringify_current_fe_exceptions(char *buf)
@@ -806,6 +829,9 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
   }
 }
   
+static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
+
+}
 
 static int bringup_monitoring_context(int tid)
 {
@@ -870,6 +896,12 @@ static int bringup()
     sa.sa_flags |= SA_SIGINFO;
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
+
+    memset(&sa, 0,sizeof(sa));
+    sa.sa_sigaction = sigalrm_handler;
+    sa.sa_flags |= SA_SIGINFO;
+
+    ORIG_IF_CAN(sigaction,SIGALRM,&sa,&oldsa_alrm);
     
     ORIG_IF_CAN(feenableexcept,exceptmask);
 
