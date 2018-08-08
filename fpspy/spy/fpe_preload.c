@@ -222,28 +222,68 @@ static void free_monitoring_context(int tid)
   unlock_contexts();
 }
 
-typedef struct fpe_state {
+// Expected value is 1/rate_parameter
+static float next_exp(float rate_parameter){
+  double u = rand() / ((double)RAND_MAX);
+  return -(log(1-u))/rate_parameter;
+}
+
+typedef struct timer_state {
   enum {ON, OFF} state;
   struct itimerval it;
-} fpe_state_t;
+} timer_state_t;
 
-#define TIME 5
-static fpe_state_t fs; // Struct to hold fpe state
+static timer_state_t timer; // Struct to hold timer state
 
-static void init_fpe_state(void) {
-  fs = (fpe_state_t){
+// Timer will alert once in given time and will not repeat
+static void set_timer(time_t tv_sec, suseconds_t tv_usec, char* string) {
+  tv_usec = tv_usec+200;
+  DEBUG("%lu: SET %s FOR %lu microsec\n", rdtsc(), string, tv_sec*1000000+tv_usec);
+  struct itimerval it = {
+    .it_interval = {
+      .tv_sec = 0,
+      .tv_usec = 0,
+    },
+    .it_value = {
+      .tv_sec = tv_sec,
+      .tv_usec =  tv_usec,
+    }
+  };
+  setitimer(ITIMER_VIRTUAL,&it, NULL);
+}
+
+static void set_timer_exp(float rate_parameter, char *string){
+  double interval = next_exp(rate_parameter);
+  double integral_ptr;
+  /* modf gives the integral part of the floating point number as ret parameter */
+  /* Fractional part of the floating point number is in frac_ptr */
+  // This will be fixed;
+  double frac_ptr = modf(interval, &integral_ptr);
+  int f_wip = (int)(frac_ptr*1000000);
+  int i_wip = (int)integral_ptr;
+  set_timer(i_wip,f_wip, string);
+}
+
+#define TIME_S 1 // Time seconds
+#define TIME_M 0 // Time microseconds
+
+static void init_timer_state(void) {
+  DEBUG("Init timer state\n");
+  timer = (timer_state_t){
     .state = ON,
     .it = {
-      .it_value = {
-	.tv_sec = TIME,
+      .it_interval = {
+	.tv_sec = 0, // Never repeat
 	.tv_usec = 0,
       },
-      .it_interval = {
-	.tv_sec = TIME,
-	.tv_usec = 0,
+      .it_value = {
+	.tv_sec = TIME_S,
+	.tv_usec = TIME_M,
       },
     }
   };
+  setitimer(ITIMER_VIRTUAL, &(timer.it), NULL); // Init wait for 1 second
+  DEBUG("End timer state\n");
 }
 
 
@@ -536,9 +576,9 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
   DEBUG("sigaction(%d,%p,%p)\n",sig,act,oldact);
   SHOW_CALL_STACK();
-  if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
+  if ((sig == SIGVTALRM || sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
     if (!aggressive) { 
-      abort_operation("target is using sigaction with SIGFPE or SIGTRAP");
+      abort_operation("target is using sigaction with SIGFPE, SIGTRAP, or SIGVTALRM");
     } else {
       // do not override our signal handlers - we are not aborting
       DEBUG("not overriding SIGFPE or SIGTRAP because we are in aggressive mode\n");
@@ -835,20 +875,22 @@ static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
   
   ucontext_t *uc = (ucontext_t *)priv;
 
-  if (fs.state == ON){
+  if (timer.state == ON){
     DEBUG("STATE IS ON GOING TO OFF\n");
     // Alarm received while in ON state
     // Mask FPE & set itimer
     clear_fp_exceptions_context(uc); // Clear fpe 
     set_mask_fp_exceptions_context(uc,1); // Mask fpe
     //    set_trap_flag_context(uc,0); // disable traps
-    fs.state = OFF;
+    timer.state = OFF;
+    set_timer_exp(100, "OFF"); 
   } else {
     DEBUG("STATE IS OFF GOING TO ON\n");
     clear_fp_exceptions_context(uc); // Clear fpe
     set_mask_fp_exceptions_context(uc,0); //Unmask fpe
     //    set_trap_flag_context(uc,1); // enable traps
-    fs.state = ON;
+    timer.state = ON;
+    set_timer_exp(100, "ON");
   }
 }
 
@@ -919,21 +961,22 @@ static int bringup()
     memset(&sa, 0,sizeof(sa));
     sa.sa_sigaction = sigalrm_handler;
     sa.sa_flags |= SA_SIGINFO;
+    if (sigaddset(&sa.sa_mask,SIGVTALRM) != 0){
+      DEBUG("UNABLE TO MASK SIGVTALRM");
+    }
 
-    ORIG_IF_CAN(sigaction,SIGALRM,&sa,&oldsa_alrm);
+    ORIG_IF_CAN(sigaction,SIGVTALRM,&sa,&oldsa_alrm);
     
     ORIG_IF_CAN(feenableexcept,exceptmask);
 
+    
+    
     // now kick ourselves to set the sse bits; we are currently in state INIT
 
     kill(getpid(),SIGTRAP);
-
-    // Start Timer
-    setitimer(ITIMER_REAL,&(fs.it),NULL);
-      
-
-    
   }
+  init_timer_state();
+
   inited=1;
   DEBUG("Done with setup\n");
   return 0;
@@ -1081,3 +1124,4 @@ static __attribute__((destructor)) void fpe_preload_deinit(void)
   inited=0;
   DEBUG("done\n");
 }
+
