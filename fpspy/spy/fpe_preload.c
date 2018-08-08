@@ -831,6 +831,25 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
   
 static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
 
+  DEBUG("Handling Alarm\n");
+  
+  ucontext_t *uc = (ucontext_t *)priv;
+
+  if (fs.state == ON){
+    DEBUG("STATE IS ON GOING TO OFF\n");
+    // Alarm received while in ON state
+    // Mask FPE & set itimer
+    clear_fp_exceptions_context(uc); // Clear fpe 
+    set_mask_fp_exceptions_context(uc,1); // Mask fpe
+    //    set_trap_flag_context(uc,0); // disable traps
+    fs.state = OFF;
+  } else {
+    DEBUG("STATE IS OFF GOING TO ON\n");
+    clear_fp_exceptions_context(uc); // Clear fpe
+    set_mask_fp_exceptions_context(uc,0); //Unmask fpe
+    //    set_trap_flag_context(uc,1); // enable traps
+    fs.state = ON;
+  }
 }
 
 static int bringup_monitoring_context(int tid)
@@ -907,7 +926,12 @@ static int bringup()
 
     // now kick ourselves to set the sse bits; we are currently in state INIT
 
-    kill(gettid(),SIGTRAP);
+    kill(getpid(),SIGTRAP);
+
+    // Start Timer
+    setitimer(ITIMER_REAL,&(fs.it),NULL);
+      
+
     
   }
   inited=1;
