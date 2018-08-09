@@ -2,16 +2,23 @@
 #  aggregation via FPE sticky behavior and trap-and-emulate
 #
 
-all: fpe_preload.so test_fpe_preload
+all: fpe_preload.so test_fpe_preload trace_print
 
-fpe_preload.so: fpe_preload.c
+fpe_preload.so: fpe_preload.c trace_record.h
 	gcc -O2 -Wall -fno-strict-aliasing -fPIC -shared fpe_preload.c -lm -ldl  -o fpe_preload.so
 
 test_fpe_preload: test_fpe_preload.c
 	gcc -O2 -Wall -fno-strict-aliasing -pthread test_fpe_preload.c -lm -o test_fpe_preload
 
+libtrace.a: libtrace.c libtrace.h trace_record.h
+	gcc -O2 -Wall -fno-strict-aliasing -c libtrace.c -o libtrace.o
+	ar ruv libtrace.a libtrace.o
+
+trace_print: libtrace.a trace_print.c
+	gcc -O2 -Wall -fno-strict-aliasing trace_print.c libtrace.a -o trace_print
+
 clean:
-	-rm fpe_preload.so test_fpe_preload
+	-rm fpe_preload.so test_fpe_preload libtrace.o libtrace.a trace_print
 	-rm __test_fpe_preload.*.fpemon
 
 test: fpe_preload.so test_fpe_preload

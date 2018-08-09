@@ -68,6 +68,7 @@
 #include <sys/syscall.h>
 #include <pthread.h>
 
+#include "trace_record.h"
 
 
 #define DEBUG_OUTPUT 1
@@ -132,17 +133,6 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
 
 #define MAX_CONTEXTS 1024
 
-// all bits set indicates an abort
-struct individual_record {
-  uint64_t time; // cycles from start of monitoring
-  void    *rip;
-  void    *rsp;
-  int      code;  // as in siginfo_t->si_code
-  int      mxcsr; 
-  char     instruction[15];
-  char     pad;
-} __attribute__((packed));
-typedef struct individual_record individual_record_t;
 
 
 
@@ -329,7 +319,7 @@ static void abort_operation(char *reason)
 	mc->state = ABORT;
 
 	// write an abort record
-	struct individual_record r;
+	struct individual_trace_record r;
 	memset(&r,0xff,sizeof(r));
 
 	r.time = rdtsc() - mc->start_time;
@@ -746,7 +736,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   }
 
   if (!(mc->count % sample_period)) { 
-    individual_record_t r;  
+    individual_trace_record_t r;  
 
     r.time = rdtsc() - mc->start_time;
     r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
