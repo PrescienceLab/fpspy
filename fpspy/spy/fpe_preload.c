@@ -32,6 +32,16 @@
   means that it will not get out of the way if the target program sets a SIGFPE signal;
   instead, the target program will just never see any of its own SIGFPEs.
 
+  Concurrency:
+      - fork() - both parent and child are tracked.  Child's FPE state is cleared
+                 any previous abort in parent is inherited
+      - exec() - Tracking restarts (assuming the environment variables are inherited)
+                 any previous abort is discarded
+      - pthread_create() - both parent and child are tracked.  Child's FPE state is cleared
+                           both have a log file.  May not work on a pthread_cancel
+                           An abort in any thread is shared by all the threads
+
+
 */
 
 #define _GNU_SOURCE
@@ -55,12 +65,16 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <ucontext.h>
+#include <sys/syscall.h>
+#include <pthread.h>
 
-#define DEBUG_OUTPUT 0
-#define NO_OUTPUT 1
+
+
+#define DEBUG_OUTPUT 1
+#define NO_OUTPUT 0
 
 #if DEBUG_OUTPUT
-#define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug: " S, ##__VA_ARGS__)
+#define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
 #else 
 #define DEBUG(S, ...) 
 #endif
@@ -69,8 +83,8 @@
 #define INFO(S, ...) 
 #define ERROR(S, ...)
 #else
-#define INFO(S, ...) fprintf(stderr,  "fpe_preload: info: " S, ##__VA_ARGS__)
-#define ERROR(S, ...) fprintf(stderr, "fpe_preload: ERROR: " S, ##__VA_ARGS__)
+#define INFO(S, ...) fprintf(stderr,  "fpe_preload: info(%8d): " S, gettid(), ##__VA_ARGS__)
+#define ERROR(S, ...) fprintf(stderr, "fpe_preload: ERROR(%8d): " S, gettid(), ##__VA_ARGS__)
 #endif
 
 volatile static int inited=0;
@@ -86,6 +100,9 @@ volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, de
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 volatile static int aggressive = 0;
 
+static int (*orig_fork)() = 0;
+static int (*orig_pthread_create)(pthread_t *tid, const pthread_attr_t *attr, void *(*start)(void*), void *arg) = 0;
+static int (*orig_pthread_exit)(void *ret) __attribute__((noreturn)) = 0;
 static sighandler_t (*orig_signal)(int sig, sighandler_t func) = 0;
 static int (*orig_sigaction)(int sig, const struct sigaction *act, struct sigaction *oldact) = 0;
 static int (*orig_feenableexcept)(int) = 0 ;
@@ -113,7 +130,7 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int;
 //#define SHOW_CALL_STACK() DEBUG("callstack (1 deep) : %p\n", __builtin_return_address(1))
 #define SHOW_CALL_STACK()
 
-#define MAX_CONTEXTS 10
+#define MAX_CONTEXTS 1024
 
 // all bits set indicates an abort
 struct individual_record {
@@ -124,8 +141,7 @@ struct individual_record {
   int      mxcsr; 
   char     instruction[15];
   char     pad;
-} __packed;
-
+} __attribute__((packed));
 typedef struct individual_record individual_record_t;
 
 
@@ -137,6 +153,10 @@ static inline uint64_t __attribute__((always_inline)) rdtsc(void)
   return lo | ((uint64_t)(hi) << 32);
 }
 
+static inline int gettid()
+{
+  return syscall(SYS_gettid);
+}
 
 // This is to allow us to handle multiple threads 
 // and to follow forks later
@@ -144,7 +164,7 @@ typedef struct monitoring_context {
   uint64_t start_time; // cycles when context created
   enum {INIT, AWAIT_FPE, AWAIT_TRAP, ABORT} state;
   int aborting_in_trap;
-  int pid;
+  int tid;
   int fd; 
   uint64_t count;
 } monitoring_context_t;
@@ -169,12 +189,13 @@ static void unlock_contexts()
 }
 
 
-static monitoring_context_t *find_monitoring_context(int pid)
+
+static monitoring_context_t *find_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
   for (i=0;i<MAX_CONTEXTS;i++) { 
-    if (context[i].pid == pid) {
+    if (context[i].tid == tid) {
       unlock_contexts();
       return &context[i];
     }
@@ -183,13 +204,13 @@ static monitoring_context_t *find_monitoring_context(int pid)
   return 0;
 }
 
-static monitoring_context_t *alloc_monitoring_context(int pid)
+static monitoring_context_t *alloc_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
   for (i=0;i<MAX_CONTEXTS;i++) { 
-    if (!context[i].pid) {
-      context[i].pid = pid;
+    if (!context[i].tid) {
+      context[i].tid = tid;
       unlock_contexts();
       return &context[i];
     }
@@ -198,13 +219,13 @@ static monitoring_context_t *alloc_monitoring_context(int pid)
   return 0;
 }
 
-static void free_monitoring_context(int pid)
+static void free_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
   for (i=0;i<MAX_CONTEXTS;i++) { 
-    if (context[i].pid == pid) {
-      context[i].pid = 0;
+    if (context[i].tid == tid) {
+      context[i].tid = 0;
       unlock_contexts();
     }
   }
@@ -299,7 +320,7 @@ static void abort_operation(char *reason)
 
     if (mode==INDIVIDUAL) {
 
-      monitoring_context_t *mc = find_monitoring_context(getpid());
+      monitoring_context_t *mc = find_monitoring_context(gettid());
 
       if (!mc) {
 	ERROR("Cannot find monitoring context to write abort record\n");
@@ -317,11 +338,14 @@ static void abort_operation(char *reason)
 	  ERROR("Failed to write abort record\n");
 	}
 	
-	// if we are aborting in a trap, the mcontext has already been restored
-	if (!mc->aborting_in_trap) {
-	  // signal ourselves to restore the FP and TRAP state in the context
-	  kill(getpid(),SIGTRAP);
-	}
+      }
+
+      // even if we have no monitoring context we need to restore
+      // the mcontext.  If we do have a monitoring context,
+      // and we are a trap, the mcontext has already been restored
+      if (!mc || !mc->aborting_in_trap) {
+	// signal ourselves to restore the FP and TRAP state in the context
+	kill(gettid(),SIGTRAP);
       }
     }
 
@@ -332,6 +356,150 @@ static void abort_operation(char *reason)
     DEBUG("Aborted operation because %s\n",reason);
   }
 }
+
+static int bringup_monitoring_context(int tid);
+
+
+int fork()
+{
+  int rc;
+
+  DEBUG("fork\n");
+
+  rc = orig_fork();
+
+  if (aborted) {
+    return rc;
+  }
+  
+  if (rc<0) {
+    DEBUG("fork failed\n");
+    return rc;
+  }
+
+  if (rc==0) {
+    // child 
+
+    // clear exceptions - we will not inherit the current ones from the parent
+    ORIG_IF_CAN(feclearexcept,exceptmask);
+
+    // in aggregate mode, a distinct log file will be generated by the destructor
+    
+    // make new context for individual mode
+    if (mode==INDIVIDUAL) {
+      
+      if (bringup_monitoring_context(gettid())) { 
+	ERROR("Failed to start up monitoring context at fork\n");
+	// we won't break, however.. 
+      } else {
+	// we should have inherited all the sighandlers, etc, from our parent
+	
+	// now kick ourselves to set the sse bits; we are currently in state INIT
+	kill(gettid(),SIGTRAP);
+	// we should now be in the right state
+      }
+      
+    }
+    DEBUG("Done with setup on fork\n");
+    return rc;
+
+  } else {
+    // parent - nothing to do
+    return rc;
+  }
+}
+
+struct tramp_context {
+  void *(*start)(void *);
+  void *arg;
+  int  done;
+};
+
+static void handle_aggregate_thread_exit();
+
+static void *trampoline(void *p)
+{
+  struct tramp_context *c = (struct tramp_context *)p;
+  void *(*start)(void *) = c->start;
+  void *arg = c->arg;
+  void *ret;
+
+  // let our wrapper go - this must also be a software barrier
+  __sync_fetch_and_or(&c->done,1);
+
+  DEBUG("Setting up thread %d\n",gettid());
+  
+  // clear exceptions just in case
+  ORIG_IF_CAN(feclearexcept,exceptmask);
+  
+  if (mode==INDIVIDUAL) {
+
+    // make new context for individual mode
+    if (bringup_monitoring_context(gettid())) { 
+      ERROR("Failed to start up monitoring context on thread creation\n");
+      // we won't break, however.. 
+    } else {
+      // we should have inherited all the sighandlers, etc, from the spawning thread
+      
+      // now kick ourselves to set the sse bits; we are currently in state INIT
+      kill(gettid(),SIGTRAP);
+      // we should now be in the right state
+    }
+    DEBUG("Done with setup on thread creation\n");
+  }
+ 
+  DEBUG("leaving trampoline\n");
+  
+  ret = start(arg);
+
+  // if it's returning normally instead of via pthread_exit(), we'll do the cleanup here
+  pthread_exit(ret);
+  
+}
+
+int pthread_create(pthread_t *tid, const pthread_attr_t *attr, void *(*start)(void*), void *arg)
+{
+  struct tramp_context c;
+
+  DEBUG("pthread_create\n");
+
+  if (aborted) {
+    return orig_pthread_create(tid,attr,start,arg);
+  }
+  
+  c.start = start;
+  c.arg = arg;
+  c.done = 0;
+
+  int rc = orig_pthread_create(tid,attr,trampoline,&c);
+
+  if (!rc) { 
+    // don't race on the tramp context - wait for thread to copy out
+    while (!__sync_fetch_and_and(&c.done,1)) { }
+  }
+
+  DEBUG("pthread_create done\n");
+
+  return rc;
+}
+
+
+__attribute__((noreturn)) void pthread_exit(void *ret)  
+{
+  DEBUG("pthread_exit(%p)\n",ret);
+
+  // we will process this even if we have aborted, since
+  // we want to flush aggregate info even if it's just an abort record
+  if (mode==INDIVIDUAL) {
+    // nothing to do since we've been writing the log file all along
+    // and we will flush them all on exit
+  } else {
+    handle_aggregate_thread_exit();
+  }
+
+  orig_pthread_exit(ret);
+}
+
 
 sighandler_t signal(int sig, sighandler_t func)
 {
@@ -348,6 +516,8 @@ sighandler_t signal(int sig, sighandler_t func)
   }
   ORIG_RETURN(signal,sig,func);
 }
+
+
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
 {
@@ -485,6 +655,9 @@ static int setup_shims()
 {
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { DEBUG("Failed to setup SHIM for " #x "\n");  return -1; }
 
+  SHIMIFY(fork);
+  SHIMIFY(pthread_create);
+  SHIMIFY(pthread_exit);
   SHIMIFY(signal);
   SHIMIFY(sigaction);
   SHIMIFY(feclearexcept);
@@ -509,7 +682,7 @@ static int setup_shims()
 
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
-  monitoring_context_t *mc = find_monitoring_context(getpid());
+  monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
 
   if (!mc || mc->state==ABORT) { 
@@ -561,10 +734,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 
 static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 {
-  monitoring_context_t *mc = find_monitoring_context(getpid());
+  monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
 
-  if (!mc) { 
+  if (!mc) {
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
     set_trap_flag_context(uc,0);         // traps disabled
@@ -644,20 +817,20 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
 }
   
 
-static int bringup_monitoring_context(int pid)
+static int bringup_monitoring_context(int tid)
 {
   monitoring_context_t *c;
   char name[80];
 
-  if (!(c = alloc_monitoring_context(pid))) { 
+  if (!(c = alloc_monitoring_context(tid))) { 
     ERROR("Cannot allocate monitoring context\n");
     return -1;
   }
 
-  sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), pid);
+  sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), tid);
   if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
     ERROR("Cannot open monitoring output file\n");
-    free_monitoring_context(pid);
+    free_monitoring_context(tid);
     return -1;
   }
 
@@ -683,7 +856,7 @@ static int bringup()
     
     init_monitoring_contexts();
 
-    if (bringup_monitoring_context(getpid())) { 
+    if (bringup_monitoring_context(gettid())) { 
       ERROR("Failed to start up monitoring context at startup\n");
       return -1;
     }
@@ -712,7 +885,7 @@ static int bringup()
 
     // now kick ourselves to set the sse bits; we are currently in state INIT
 
-    kill(getpid(),SIGTRAP);
+    kill(gettid(),SIGTRAP);
     
   }
   inited=1;
@@ -816,6 +989,30 @@ static __attribute__((constructor)) void fpe_preload_init(void)
 }
 
 
+static void handle_aggregate_thread_exit()
+{
+  char buf[80];
+  int fd;
+  DEBUG("Dumping aggregate exceptions\n");
+  //show_current_fe_exceptions();
+  sprintf(buf,"__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0),gettid());
+  if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
+    ERROR("Cannot open monitoring output file\n");
+  } else {
+    if (!aborted) { 
+      stringify_current_fe_exceptions(buf);
+      strcat(buf,"\n");
+    } else {
+      strcpy(buf,"ABORTED\n");
+    }
+    if (writeall(fd,buf,strlen(buf))) {
+      ERROR("Failed to write all of monitoring output\n");
+    }
+    DEBUG("aggregate exception string: %s",buf);
+    close(fd);
+  }
+}
+
     
 // Called on unload of preload library
 static __attribute__((destructor)) void fpe_preload_deinit(void) 
@@ -824,31 +1021,12 @@ static __attribute__((destructor)) void fpe_preload_deinit(void)
   DEBUG("deinit\n");
   if (inited) { 
     if (mode==AGGREGATE) {
-      char buf[80];
-      int fd;
-      DEBUG("Dumping aggregate exceptions\n");
-      //show_current_fe_exceptions();
-      sprintf(buf,"__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0),getpid());
-      if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
-	ERROR("Cannot open monitoring output file\n");
-      } else {
-	if (!aborted) { 
-	  stringify_current_fe_exceptions(buf);
-	  strcat(buf,"\n");
-	} else {
-	  strcpy(buf,"ABORTED\n");
-	}
-	if (writeall(fd,buf,strlen(buf))) {
-	  ERROR("Failed to write all of monitoring output\n");
-	}
-	DEBUG("aggregate exception string: %s",buf);
-	close(fd);
-      }
+      handle_aggregate_thread_exit();
     } else {
       int i;
       DEBUG("FPE exceptions previously dumped to files - now closing them\n");
       for (i=0;i<MAX_CONTEXTS;i++) { 
-	if (context[i].pid) { 
+	if (context[i].tid) { 
 	  close(context[i].fd);
 	}
       }
