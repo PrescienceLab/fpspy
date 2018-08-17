@@ -235,6 +235,22 @@ typedef struct timer_state {
 
 static timer_state_t timer; // Struct to hold timer state
 
+typedef enum {EXP_DECAY, POISSON} distribution_t;
+
+static float get_rv(distribution_t dist, float rate_parameter){
+  switch (dist) {
+    case EXP_DECAY:
+      return next_exp(rate_parameter);
+    default:
+      return -1;
+    }
+}
+
+static void split(double val, double *integral, double *frac){
+  *frac = modf(val,integral);
+}
+
+
 #define MAX_TIMER_GRANULARITY 200
 // ^--- Rigorously defined
 
@@ -250,33 +266,55 @@ static void set_timer(time_t arrival_sec, suseconds_t arrival_usec, time_t servi
   DEBUG("%lu: Arrival: %lu Service: %lu \n", rdtsc(), arrival_usec, service_usec);  
   struct itimerval it = {
     .it_interval = {
-      .tv_sec = 0,//arrival_sec,
+      .tv_sec = arrival_sec,
       .tv_usec = arrival_usec,
     },
     .it_value = {
-      .tv_sec = 0,//service_sec,
+      .tv_sec = service_sec,
       .tv_usec =  service_usec,
     }
   };
   setitimer(ITIMER_VIRTUAL,&it, NULL);
 }
 
-static void set_timer_exp(float rate_parameter, char *string){
-  double arrival = next_exp(rate_parameter);
-  double arrival_integral_ptr;
-  /* modf gives the integral part of the floating point number as ret parameter */
-  /* Fractional part of the floating point number is in frac_ptr */
-  // This will be fixed;
-  double arrival_frac_ptr = modf(arrival, &arrival_integral_ptr);
-  int afp = (int)(arrival_frac_ptr*1000000);
-  int aip = (int)arrival_integral_ptr;
-  double service = next_exp(rate_parameter);
-  double service_integral_ptr;
-  double service_frac_ptr = modf(service, &service_integral_ptr);
-  int sfp = (int)(service_frac_ptr*1000000);
-  int sip = (int)service_integral_ptr;
-  set_timer(aip,afp,sip,sfp, string);
+static void set_arrival_service(distribution_t arrivals, distribution_t services, float rate_parameter){
+  double arrival = get_rv(arrivals, rate_parameter);
+  double service = get_rv(services, rate_parameter);
+
+  double arrival_i, arrival_f;
+  double service_i, service_f;
+
+  split(arrival, &arrival_i, &arrival_f);
+  split(service, &service_i, &service_f);
+
+  // arrival_i contains the integral part of the fp value
+  // arrival_f contains the fractional part of the fp value
+
+  int arrival_frac = (int)(arrival_f*1000000);
+  int arrival_int = (int)(arrival_i);
+
+  int service_frac = (int)(service_f*1000000);
+  int service_int = (int)(service_i);
+
+  set_timer(arrival_int, arrival_frac, service_int, service_frac, " ");
 }
+
+/* static void set_timer_exp(float rate_parameter, char *string){ */
+/*   double arrival = next_exp(rate_parameter); */
+/*   double arrival_integral_ptr; */
+/*   /\* modf gives the integral part of the floating point number as ret parameter *\/ */
+/*   /\* Fractional part of the floating point number is in frac_ptr *\/ */
+/*   // This will be fixed; */
+/*   double arrival_frac_ptr = modf(arrival, &arrival_integral_ptr); */
+/*   int afp = (int)(arrival_frac_ptr*1000000); */
+/*   int aip = (int)arrival_integral_ptr; */
+/*   double service = next_exp(rate_parameter); */
+/*   double service_integral_ptr; */
+/*   double service_frac_ptr = modf(service, &service_integral_ptr); */
+/*   int sfp = (int)(service_frac_ptr*1000000); */
+/*   int sip = (int)service_integral_ptr; */
+/*   set_timer(aip,afp,sip,sfp, string); */
+/* } */
 
 #define TIME_S 1 // Time seconds
 #define TIME_M 0 // Time microseconds
@@ -897,7 +935,7 @@ static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
     set_mask_fp_exceptions_context(uc,1); // Mask fpe
     //    set_trap_flag_context(uc,0); // disable traps
     timer.state = OFF;
-    set_timer_exp(100, "OFF"); 
+    set_arrival_service(EXP_DECAY, EXP_DECAY, 100);
   } else {
     DEBUG("STATE IS OFF GOING TO ON\n");
     clear_fp_exceptions_context(uc); // Clear fpe
