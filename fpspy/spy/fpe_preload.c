@@ -235,33 +235,47 @@ typedef struct timer_state {
 
 static timer_state_t timer; // Struct to hold timer state
 
-// Timer will alert once in given time and will not repeat
-static void set_timer(time_t tv_sec, suseconds_t tv_usec, char* string) {
-  tv_usec = tv_usec+200;
-  DEBUG("%lu: SET %s FOR %lu microsec\n", rdtsc(), string, tv_sec*1000000+tv_usec);
+#define MAX_TIMER_GRANULARITY 200
+// ^--- Rigorously defined
+
+// Timer will only be set in OFF state
+static void set_timer(time_t arrival_sec, suseconds_t arrival_usec, time_t service_sec, suseconds_t service_usec, char* string){
+  if (arrival_usec < MAX_TIMER_GRANULARITY) {
+    arrival_usec = MAX_TIMER_GRANULARITY;
+  }
+
+  if (service_usec < MAX_TIMER_GRANULARITY) {
+    service_usec = MAX_TIMER_GRANULARITY;
+  }
+  DEBUG("%lu: Arrival: %lu Service: %lu \n", rdtsc(), arrival_usec, service_usec);  
   struct itimerval it = {
     .it_interval = {
-      .tv_sec = 0,
-      .tv_usec = 0,
+      .tv_sec = 0,//arrival_sec,
+      .tv_usec = arrival_usec,
     },
     .it_value = {
-      .tv_sec = tv_sec,
-      .tv_usec =  tv_usec,
+      .tv_sec = 0,//service_sec,
+      .tv_usec =  service_usec,
     }
   };
   setitimer(ITIMER_VIRTUAL,&it, NULL);
 }
 
 static void set_timer_exp(float rate_parameter, char *string){
-  double interval = next_exp(rate_parameter);
-  double integral_ptr;
+  double arrival = next_exp(rate_parameter);
+  double arrival_integral_ptr;
   /* modf gives the integral part of the floating point number as ret parameter */
   /* Fractional part of the floating point number is in frac_ptr */
   // This will be fixed;
-  double frac_ptr = modf(interval, &integral_ptr);
-  int f_wip = (int)(frac_ptr*1000000);
-  int i_wip = (int)integral_ptr;
-  set_timer(i_wip,f_wip, string);
+  double arrival_frac_ptr = modf(arrival, &arrival_integral_ptr);
+  int afp = (int)(arrival_frac_ptr*1000000);
+  int aip = (int)arrival_integral_ptr;
+  double service = next_exp(rate_parameter);
+  double service_integral_ptr;
+  double service_frac_ptr = modf(service, &service_integral_ptr);
+  int sfp = (int)(service_frac_ptr*1000000);
+  int sip = (int)service_integral_ptr;
+  set_timer(aip,afp,sip,sfp, string);
 }
 
 #define TIME_S 1 // Time seconds
@@ -890,7 +904,6 @@ static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
     set_mask_fp_exceptions_context(uc,0); //Unmask fpe
     //    set_trap_flag_context(uc,1); // enable traps
     timer.state = ON;
-    set_timer_exp(100, "ON");
   }
 }
 
