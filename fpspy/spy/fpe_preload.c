@@ -32,6 +32,10 @@
   means that it will not get out of the way if the target program sets a SIGFPE signal;
   instead, the target program will just never see any of its own SIGFPEs.
 
+  In individual mode, you can also employ Poisson sampling, where the on and off
+  periods are chosen from an exponential random distibution whose parameters are
+  given via an evironmental variable.
+
   Concurrency:
       - fork() - both parent and child are tracked.  Child's FPE state is cleared
                  any previous abort in parent is inherited
@@ -55,7 +59,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <dlfcn.h>
-#include <math.h>
 #include <fenv.h>
 #include <errno.h>
 #include <string.h>
@@ -68,12 +71,14 @@
 #include <sys/syscall.h>
 #include <pthread.h>
 
+#include <math.h>
+
 #include "trace_record.h"
 
 #include <sys/time.h>
 
-#define DEBUG_OUTPUT 1
-#define NO_OUTPUT 0
+#define DEBUG_OUTPUT 0
+#define NO_OUTPUT 1
 
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
@@ -93,6 +98,16 @@ volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
 volatile static int maxcount=65546; // maximum number to record, per thread
 volatile static int sample_period=1; // 1 = capture every one
+
+volatile static uint64_t random_seed;
+
+volatile static int timers=0; // are using timing-based sampling?
+// used for poisson sampler
+volatile static uint64_t on_mean_us, off_mean_us;
+
+// for testing with sleep codes
+volatile static int timer_type = ITIMER_REAL;
+
 volatile static int exceptmask=FE_ALL_EXCEPT; // which C99 exceptions to handle, default all
 volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, default all (using base zero)
 
@@ -148,6 +163,19 @@ static inline int gettid()
   return syscall(SYS_gettid);
 }
 
+typedef struct rand_state {
+    uint64_t xi;
+} rand_state_t;
+
+typedef struct sampler_state {
+    enum {OFF=0, ON}   state;
+    int              delayed_processing;
+    rand_state_t     rand;
+    uint64_t         on_mean_us;
+    uint64_t         off_mean_us;
+    struct itimerval it;
+} sampler_state_t;
+
 // This is to allow us to handle multiple threads 
 // and to follow forks later
 typedef struct monitoring_context {
@@ -157,7 +185,60 @@ typedef struct monitoring_context {
   int tid;
   int fd; 
   uint64_t count;
+  sampler_state_t sampler;   // used only when sampling is on
 } monitoring_context_t;
+
+typedef union  {
+    uint32_t val;
+    struct {
+	uint8_t ie:1;  // detected nan
+	uint8_t de:1;  // detected denormal
+	uint8_t ze:1;  // detected divide by zero
+	uint8_t oe:1;  // detected overflow (infinity)
+	uint8_t ue:1;  // detected underflow (zero)
+	uint8_t pe:1;  // detected precision (rounding)
+	uint8_t daz:1; // denormals become zeros
+	uint8_t im:1;  // mask nan exceptions
+	uint8_t dm:1;  // mask denorm exceptions
+	uint8_t zm:1;  // mask zero exceptions
+	uint8_t om:1;  // mask overflow exceptions
+	uint8_t um:1;  // mask underflow exceptions
+	uint8_t pm:1;  // mask precision exceptions
+	uint8_t rounding:2; // rounding (toward 00=>nearest,01=>negative,10=>positive,11=>zero)
+	uint8_t fz:1;  // flush to zero (denormals are zeros)
+	uint16_t rest;  
+    } __attribute__((packed));
+} __attribute__((packed)) mxcsr_t;
+
+typedef union {
+    uint64_t val;
+    struct {
+	// note that not all of these are visible in user mode
+	uint8_t cf:1;    // detected carry
+	uint8_t res1:1;  // reserved MB1
+	uint8_t pf:1;    // detected parity
+	uint8_t res2:1;  // reserved
+	uint8_t af:1;    // detected adjust (BCD math)
+	uint8_t res3:1;  // resered
+	uint8_t zf:1;    // detected zero
+	uint8_t sf:1;    // detected negative
+	uint8_t tf:1;    // trap enable flag (single stepping)
+	uint8_t intf:1;    // interrupt enable flag
+	uint8_t df:1;    // direction flag (1=down);
+	uint8_t of:1;    // detected overflow
+	uint8_t iopl:2;  // I/O privilege level (ring)
+	uint8_t nt:1;    // nested task
+	uint8_t res4:1;  // reserved
+	uint8_t rf:1;    // resume flag;
+	uint8_t vm:1;    // virtual 8086 mode
+	uint8_t ac:1;    // alignment check enable
+	uint8_t vif:1;   // virtual interrupt flag
+	uint8_t vip:1;   // virtual interrupt pending;
+	uint8_t id:1;    // have cpuid instruction
+	uint16_t res5:10; // reserved
+	uint32_t res6;    // nothing in top half of rflags yet
+    } __attribute__((packed));
+} __attribute__((packed)) rflags_t;
 
 static int  context_lock;
 static monitoring_context_t context[MAX_CONTEXTS];
@@ -222,121 +303,62 @@ static void free_monitoring_context(int tid)
   unlock_contexts();
 }
 
-// Expected value is 1/rate_parameter
-static float next_exp(float rate_parameter){
-  double u = rand() / ((double)RAND_MAX);
-  return -(log(1-u))/rate_parameter;
+// built in random number generator to avoid changing the state
+// of the application's random number generator
+//
+// This is borrowed from NK and should probably be replaced
+//
+static void seed_rand(sampler_state_t *s, uint64_t seed)
+{
+    s->rand.xi = seed;
 }
 
-typedef struct timer_state {
-  enum {ON, OFF} state;
-  struct itimerval it;
-} timer_state_t;
+// linear congruent, full 64 bit space
+static inline uint64_t _pump_rand(uint64_t xi, uint64_t a, uint64_t c)
+{
+    uint64_t xi_new = (a*xi + c);
 
-static timer_state_t timer; // Struct to hold timer state
+    return xi_new;
+}    
 
-typedef enum {EXP_DECAY, POISSON} distribution_t;
+static inline uint64_t pump_rand(sampler_state_t *s)
+{
+    s->rand.xi = _pump_rand(s->rand.xi, 0x5deece66dULL, 0xbULL);
+    
+    return s->rand.xi;
+}
 
-static float get_rv(distribution_t dist, float rate_parameter){
-  switch (dist) {
-    case EXP_DECAY:
-      return next_exp(rate_parameter);
-    default:
-      return -1;
+static inline uint64_t get_rand(sampler_state_t *s)
+{
+    return pump_rand(s);
+}
+
+
+// we assume here that the FP state is saved and restored
+// by the handler wrapper code, otherwise this will damage things badly
+// this is of course true for Linux user, but not necessarily NK kernel
+// period in us, return in us
+static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
+{
+    uint64_t r = get_rand(s);
+    double u;
+    r = r & -2ULL; // make sure that we are not at max
+
+    u = ((double) r) / ((double) (-1ULL));
+
+    // u = [0,1)
+
+    u = -log(1.0 - u) * ((double)mean_us);
+
+    // now shape u back into a uint64_t
+
+    if (u > ((double)(-1ULL))) {
+	return -1ULL;
+    } else {
+	return (uint64_t)u;
     }
 }
 
-static void split(double val, double *integral, double *frac){
-  *frac = modf(val,integral);
-}
-
-
-#define MAX_TIMER_GRANULARITY 200
-// ^--- Rigorously defined
-
-// Timer will only be set in OFF state
-static void set_timer(time_t arrival_sec, suseconds_t arrival_usec, time_t service_sec, suseconds_t service_usec, char* string){
-  if (arrival_usec < MAX_TIMER_GRANULARITY) {
-    arrival_usec = MAX_TIMER_GRANULARITY;
-  }
-
-  if (service_usec < MAX_TIMER_GRANULARITY) {
-    service_usec = MAX_TIMER_GRANULARITY;
-  }
-  DEBUG("%lu: Arrival: %lu Service: %lu \n", rdtsc(), arrival_usec, service_usec);  
-  struct itimerval it = {
-    .it_interval = {
-      .tv_sec = arrival_sec,
-      .tv_usec = arrival_usec,
-    },
-    .it_value = {
-      .tv_sec = service_sec,
-      .tv_usec =  service_usec,
-    }
-  };
-  setitimer(ITIMER_VIRTUAL,&it, NULL);
-}
-
-static void set_arrival_service(distribution_t arrivals, distribution_t services, float rate_parameter){
-  double arrival = get_rv(arrivals, rate_parameter);
-  double service = get_rv(services, rate_parameter);
-
-  double arrival_i, arrival_f;
-  double service_i, service_f;
-
-  split(arrival, &arrival_i, &arrival_f);
-  split(service, &service_i, &service_f);
-
-  // arrival_i contains the integral part of the fp value
-  // arrival_f contains the fractional part of the fp value
-
-  int arrival_frac = (int)(arrival_f*1000000);
-  int arrival_int = (int)(arrival_i);
-
-  int service_frac = (int)(service_f*1000000);
-  int service_int = (int)(service_i);
-
-  set_timer(arrival_int, arrival_frac, service_int, service_frac, " ");
-}
-
-/* static void set_timer_exp(float rate_parameter, char *string){ */
-/*   double arrival = next_exp(rate_parameter); */
-/*   double arrival_integral_ptr; */
-/*   /\* modf gives the integral part of the floating point number as ret parameter *\/ */
-/*   /\* Fractional part of the floating point number is in frac_ptr *\/ */
-/*   // This will be fixed; */
-/*   double arrival_frac_ptr = modf(arrival, &arrival_integral_ptr); */
-/*   int afp = (int)(arrival_frac_ptr*1000000); */
-/*   int aip = (int)arrival_integral_ptr; */
-/*   double service = next_exp(rate_parameter); */
-/*   double service_integral_ptr; */
-/*   double service_frac_ptr = modf(service, &service_integral_ptr); */
-/*   int sfp = (int)(service_frac_ptr*1000000); */
-/*   int sip = (int)service_integral_ptr; */
-/*   set_timer(aip,afp,sip,sfp, string); */
-/* } */
-
-#define TIME_S 1 // Time seconds
-#define TIME_M 0 // Time microseconds
-
-static void init_timer_state(void) {
-  DEBUG("Init timer state\n");
-  timer = (timer_state_t){
-    .state = ON,
-    .it = {
-      .it_interval = {
-	.tv_sec = 0, // Never repeat
-	.tv_usec = 0,
-      },
-      .it_value = {
-	.tv_sec = TIME_S,
-	.tv_usec = TIME_M,
-      },
-    }
-  };
-  setitimer(ITIMER_VIRTUAL, &(timer.it), NULL); // Init wait for 1 second
-  DEBUG("End timer state\n");
-}
 
 
 static void stringify_current_fe_exceptions(char *buf)
@@ -385,6 +407,67 @@ static int writeall(int fd, void *buf, int len)
 
 static __attribute__((constructor)) void fpe_preload_init(void);
 
+#if DEBUG_OUTPUT
+
+static void dump_rflags(char *pre, ucontext_t *uc)
+{
+    char buf[256];
+    
+    rflags_t *r = (rflags_t *)&(uc->uc_mcontext.gregs[REG_EFL]);
+
+    sprintf(buf, "rflags = %016lx", r->val);
+    
+#define EF(x,y) if (r->x) { strcat(buf, " " #y); }
+
+    EF(zf,zero);
+    EF(sf,neg);
+    EF(cf,carry);
+    EF(of,over);
+    EF(pf,parity);
+    EF(af,adjust);
+    EF(tf,TRAP);
+    EF(intf,interrupt);
+    EF(ac,alignment)
+    EF(df,down);
+
+    DEBUG("%s: %s\n",pre,buf);
+}
+
+static void dump_mxcsr(char *pre, ucontext_t *uc)
+{
+    char buf[256];
+
+    mxcsr_t *m = (mxcsr_t *)&uc->uc_mcontext.fpregs->mxcsr;
+
+    sprintf(buf,"mxcsr = %08x flags:", m->val);
+
+#define MF(x,y) if (m->x) { strcat(buf, " " #y); }
+
+    MF(ie,NAN);
+    MF(de,DENORM);
+    MF(ze,ZERO);
+    MF(oe,OVER);
+    MF(ue,UNDER);
+    MF(pe,PRECISION);
+    
+    strcat(buf," masking:");
+
+    MF(im,nan);
+    MF(dm,denorm);
+    MF(zm,zero);
+    MF(om,over);
+    MF(um,under);
+    MF(pm,precision);
+
+    DEBUG("%s: %s rounding: %s %s%s\n",pre,buf,
+	  m->rounding == 0 ? "nearest" :
+	  m->rounding == 1 ? "negative" :
+	  m->rounding == 2 ? "positive" : "zero",
+	  m->daz ? "DAZ" : "",
+	  m->fz ? "FTZ" : "");
+}
+
+#endif
 
 static inline void set_trap_flag_context(ucontext_t *uc, int val)
 {
@@ -784,6 +867,66 @@ static int setup_shims()
 }
 
 
+// is it really the case we cannot meaningfully manipulate ucontext
+// here to change the FP engine?  Really?   Why would this work in
+// both SIGFPE and SIGTRAP but not here?
+static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
+{
+    sampler_state_t *s = &mc->sampler;
+
+    //dump_rflags("update before",uc);
+    //dump_mxcsr("update before",uc);
+
+    // we are guaranteed to be in AWAIT_FPE state at this
+    // point.
+    //
+    // ON->OFF : clear fpe, mask fpe, turn off traps
+    // OFF->ON : clear fpe, unmask fpe, turn off traps
+    //
+    // traps should already be off, but why not be sure
+
+    if (s->state==ON) { 
+	DEBUG("Switching from on to off\n");
+	clear_fp_exceptions_context(uc); // Clear fpe 
+	set_mask_fp_exceptions_context(uc,1); // Mask fpe
+	set_trap_flag_context(uc,0); // disable traps
+    } else {
+	DEBUG("Switching from off to on\n");
+	clear_fp_exceptions_context(uc); // Clear fpe
+	set_mask_fp_exceptions_context(uc,0); //Unmask fpe
+	set_trap_flag_context(uc,0); // disable traps
+    }
+
+    // schedule next wakeup
+
+    uint64_t n = next_exp(s,s->state==ON ? s->off_mean_us : s->on_mean_us);
+    
+    s->it.it_interval.tv_sec = 0;
+    s->it.it_interval.tv_usec = 0;
+    s->it.it_value.tv_sec = n / 1000000;
+    s->it.it_value.tv_usec = n % 1000000;
+    
+    
+    // flip state
+    s->state = s->state==ON ? OFF : ON ;
+
+    // don't reprocess again in case we are running delayed because
+    // we were not intially in an AWAIT_FPE
+    if (s->delayed_processing) {
+	DEBUG("Completed delayed processing\n");
+	s->delayed_processing = 0;
+    }
+
+    if (setitimer(timer_type, &s->it, NULL)) {
+	ERROR("Failed to set timer?!\n");
+    }
+
+    //dump_rflags("update after",uc);
+    //dump_mxcsr("update after",uc);
+    
+    DEBUG("Timer reinitialized for %lu us state %s\n",n,s->state==ON ? "ON" : "off");
+}
+
 
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
@@ -826,6 +969,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     }
     set_trap_flag_context(uc,0);          // traps disabled
     mc->state = AWAIT_FPE;
+    if (mc->sampler.delayed_processing) {
+	DEBUG("Delayed sampler handling\n");
+	update_sampler(mc,uc);
+    }
   } else {
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
@@ -833,6 +980,8 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     mc->aborting_in_trap = 1;
     abort_operation("Surprise state during sigtrap_handler exec");
   }
+
+  DEBUG("TRAP done\n");
 }
 
 
@@ -900,6 +1049,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     set_trap_flag_context(uc,0);         // traps disabled
     abort_operation("Surprise state during sigfpe_handler exec");
   }
+  DEBUG("FPE done\n");
 }
 
 static __attribute__((destructor)) void fpe_preload_deinit(void);
@@ -920,29 +1070,83 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
     exit(-1);
   }
 }
-  
-static void sigalrm_handler(int sig, siginfo_t *si,  void *priv){
 
-  DEBUG("Handling Alarm\n");
-  
-  ucontext_t *uc = (ucontext_t *)priv;
+    
 
-  if (timer.state == ON){
-    DEBUG("STATE IS ON GOING TO OFF\n");
-    // Alarm received while in ON state
-    // Mask FPE & set itimer
-    clear_fp_exceptions_context(uc); // Clear fpe 
-    set_mask_fp_exceptions_context(uc,1); // Mask fpe
-    //    set_trap_flag_context(uc,0); // disable traps
-    timer.state = OFF;
-    set_arrival_service(EXP_DECAY, EXP_DECAY, 100);
-  } else {
-    DEBUG("STATE IS OFF GOING TO ON\n");
-    clear_fp_exceptions_context(uc); // Clear fpe
-    set_mask_fp_exceptions_context(uc,0); //Unmask fpe
-    //    set_trap_flag_context(uc,1); // enable traps
-    timer.state = ON;
-  }
+static void sigalrm_handler(int sig, siginfo_t *si,  void *priv)
+{
+    monitoring_context_t *mc = find_monitoring_context(gettid());
+    ucontext_t *uc = (ucontext_t *)priv;
+ 
+    DEBUG("Timeout for %d\n", gettid());
+
+    //dump_rflags("before alarm",uc);
+    //dump_mxcsr("before alarm",uc);
+
+    
+    if (!mc) {
+	ERROR("Could not find monitoring context for %d\n",gettid());
+	return;
+    }
+
+
+    if (mc->state != AWAIT_FPE) {
+	// we are in the middle of handling an instruction, so we will
+	// defer the transition until after this is done
+	DEBUG("Delaying sampler processing because we are in the middle of an instruction\n");
+	mc->sampler.delayed_processing = 1;
+	return ;
+    } else {
+	update_sampler(mc,uc);
+    }
+
+    //dump_rflags("after alarm",uc);
+    //dump_mxcsr("after alarm",uc);
+
+}
+
+    
+
+void init_random(sampler_state_t *s)
+{
+    // randomization
+    if (random_seed!=-1) {
+	seed_rand(s,random_seed);
+    } else {
+	seed_rand(s,rdtsc());
+    }
+}
+
+
+
+void init_sampler(sampler_state_t *s)
+{
+    DEBUG("Init sampler (%p)\n",s);
+    
+    init_random(s);
+
+    s->on_mean_us = on_mean_us;
+    s->off_mean_us = off_mean_us;
+
+    s->state = ON;
+    
+    if (!timers) {
+	DEBUG("Sampler without timing\n");
+	return;
+    }
+    
+    uint64_t n = next_exp(s,s->on_mean_us);
+    
+    s->it.it_interval.tv_sec = 0;
+    s->it.it_interval.tv_usec = 0;
+    s->it.it_value.tv_sec = n / 1000000;
+    s->it.it_value.tv_usec = n % 1000000;
+    
+
+    if (setitimer(timer_type, &(s->it), NULL)) {
+	ERROR("Failed to set timer?!\n");
+    }
+    DEBUG("Timer initialized for %lu us\n",n);
 }
 
 static int bringup_monitoring_context(int tid)
@@ -967,6 +1171,8 @@ static int bringup_monitoring_context(int tid)
   c->aborting_in_trap = 0;
   c->count = 0;
 
+  init_sampler(&c->sampler);
+  
   return 0;
 }
 
@@ -994,39 +1200,54 @@ static int bringup()
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
-   
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGINT);
+    sigaddset(&sa.sa_mask, SIGTRAP);
+    sigaddset(&sa.sa_mask, SIGALRM);
+    
     ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
 
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
     sa.sa_flags |= SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGINT);
+    sigaddset(&sa.sa_mask, SIGTRAP);
+    sigaddset(&sa.sa_mask, SIGALRM);
     
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigint_handler;
     sa.sa_flags |= SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGTRAP);
+    sigaddset(&sa.sa_mask, SIGALRM);
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
 
-    memset(&sa, 0,sizeof(sa));
-    sa.sa_sigaction = sigalrm_handler;
-    sa.sa_flags |= SA_SIGINFO;
-    if (sigaddset(&sa.sa_mask,SIGVTALRM) != 0){
-      DEBUG("UNABLE TO MASK SIGVTALRM");
+    if (timers) {
+	// only initialize timing if we need it
+	DEBUG("Setting up timer interrupt handler\n");
+	memset(&sa, 0,sizeof(sa));
+	sa.sa_sigaction = sigalrm_handler;
+	sa.sa_flags |= SA_SIGINFO;
+	sigemptyset(&sa.sa_mask);
+	sigaddset(&sa.sa_mask, SIGINT);
+	ORIG_IF_CAN(sigaction,
+		    timer_type==ITIMER_REAL ? SIGALRM :
+		    timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
+		    timer_type==ITIMER_PROF ? SIGPROF : SIGALRM,
+		    &sa,&oldsa_alrm);
     }
 
-    ORIG_IF_CAN(sigaction,SIGVTALRM,&sa,&oldsa_alrm);
-    
     ORIG_IF_CAN(feenableexcept,exceptmask);
-
-    
     
     // now kick ourselves to set the sse bits; we are currently in state INIT
 
     kill(getpid(),SIGTRAP);
   }
-  init_timer_state();
+  
 
   inited=1;
   DEBUG("Done with setup\n");
@@ -1113,6 +1334,35 @@ static __attribute__((constructor)) void fpe_preload_init(void)
     if (getenv("FPE_SAMPLE")) {
       sample_period = atoi(getenv("FPE_SAMPLE"));
       DEBUG("Setting sample period to %d\n", sample_period);
+    }
+    if (getenv("FPE_POISSON")) {
+	if (sscanf(getenv("FPE_POISSON"),"%lu:%lu",&on_mean_us,&off_mean_us)!=2) {
+	    ERROR("unsupported FPE_POISSON arguments\n");
+	    return;
+	} else {
+	    DEBUG("Setting Poisson sampling %lu us off %lu us on\n",on_mean_us, off_mean_us);
+	    timers = 1;
+	}
+    }
+    if (getenv("FPE_TIMER")) {
+	if (!strcasecmp(getenv("FPE_TIMER"),"virtual")) {
+	    timer_type = ITIMER_VIRTUAL;
+	    DEBUG("Using virtual timer\n");
+	} else if (!strcasecmp(getenv("FPE_TIMER"),"real")) {
+	    timer_type = ITIMER_REAL;
+	    DEBUG("Using real timer\n");
+	} else if (!strcasecmp(getenv("FPE_TIMER"),"prof")) {
+	    timer_type = ITIMER_PROF;
+	    DEBUG("Using profiling timer\n");
+	} else {
+	    ERROR("Unknown FPE_TIMER=%s type\n",getenv("FPE_TIMER"));
+	    return;
+	}
+    }
+    if (getenv("FPE_SEED")) {
+	random_seed = atol(getenv("FPE_SEED"));
+    } else {
+	random_seed = -1; // random selection at mc start
     }
     if (getenv("FPE_EXCEPT_LIST")) {
       config_exceptions(getenv("FPE_EXCEPT_LIST"));

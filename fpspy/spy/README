@@ -61,10 +61,32 @@ FPE_EXCEPT_LIST=list
 	underflow
 	precision (rounding)
 	
-                    
 
-Work in progress
+FPE_POISSON=A:B
+   means that Poisson sampling will be used with the ON period
+   chosen from an exponential random distro with mean A usec
+   and OFF period chosen from an exponential distro with mean
+   B seconds.
 
 - time-based sampling and poisson sampling model
-- following fork/clone
 
+FPE_SEED=n
+   means the internal random number generator for sampling
+   is seeded with value n
+
+FPE_TIMER=real|virtual|prof  (default real)
+
+virtual timer means by instructions, real timer means by real-time
+That is, with FPE_POISSON=A:B, and FPE_TIMER=virtual, A and B are
+interpretted as time spent awake, instead of time spent.   prof timer
+is virtual time in both kernel and user space, and using a signal
+the application is unlikely to be using.
+
+For getting a sense of how FPE_POISSON operates, you can
+also run:
+
+make test_sleepy  (real time)
+
+or
+
+make test_dopey (virtual or profile time)
