@@ -671,6 +671,8 @@ int pthread_create(pthread_t *tid, const pthread_attr_t *attr, void *(*start)(vo
   return rc;
 }
 
+static int teardown_monitoring_context(int tid);
+
 
 __attribute__((noreturn)) void pthread_exit(void *ret)  
 {
@@ -679,8 +681,7 @@ __attribute__((noreturn)) void pthread_exit(void *ret)
   // we will process this even if we have aborted, since
   // we want to flush aggregate info even if it's just an abort record
   if (mode==INDIVIDUAL) {
-    // nothing to do since we've been writing the log file all along
-    // and we will flush them all on exit
+    teardown_monitoring_context(gettid());
   } else {
     handle_aggregate_thread_exit();
   }
@@ -932,6 +933,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
+  
+  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
+        si->si_signo, si->si_errno, si->si_code, si->si_addr);
+
 
   if (!mc || mc->state==ABORT) { 
     clear_fp_exceptions_context(uc);     // exceptions cleared
@@ -955,9 +960,6 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     return;
   }
   
-  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
-	si->si_signo, si->si_errno, si->si_code, si->si_addr);
-
   if (mc->state == AWAIT_TRAP) { 
     mc->count++;
     clear_fp_exceptions_context(uc);      // exceptions cleared
@@ -990,6 +992,12 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
+
+  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p \n",
+        si->si_signo, si->si_errno, si->si_code, si->si_addr);
+  DEBUG("FPE RIP=%p RSP=%p\n",
+        (void*) uc->uc_mcontext.gregs[REG_RIP], (void*)  uc->uc_mcontext.gregs[REG_RSP]);
+    
 
   if (!mc) {
     clear_fp_exceptions_context(uc);     // exceptions cleared
@@ -1032,12 +1040,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     break;
   }
 #endif
-  
-  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p %s\n",
-	si->si_signo, si->si_errno, si->si_code, si->si_addr,buf);
-  DEBUG("FPE RIP=%p RSP=%p\n",
-	(void*) uc->uc_mcontext.gregs[REG_RIP], (void*)  uc->uc_mcontext.gregs[REG_RSP]);
-    
+      
   if (mc->state == AWAIT_FPE) { 
     clear_fp_exceptions_context(uc);      // exceptions cleared
     set_mask_fp_exceptions_context(uc,1); // exceptions masked
@@ -1176,6 +1179,27 @@ static int bringup_monitoring_context(int tid)
   return 0;
 }
 
+
+static int teardown_monitoring_context(int tid)
+{
+  monitoring_context_t *mc = find_monitoring_context(tid);
+
+  if (!mc) {
+    ERROR("Cannot find monitoring context for %d\n",tid);
+    return -1;
+  }
+
+  // add later - not relevant now PAD
+  // deinit_sampler(&mc->sampler);
+ 
+  close(mc->fd);
+  free_monitoring_context(tid);
+
+  DEBUG("Tore down monitoring context for %d\n",tid);
+
+  return 0;
+}
+
  
 static int bringup()
 {
@@ -1214,7 +1238,7 @@ static int bringup()
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTRAP);
     sigaddset(&sa.sa_mask, SIGALRM);
-    
+    sigaddset(&sa.sa_mask, SIGFPE); 
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
     memset(&sa,0,sizeof(sa));
