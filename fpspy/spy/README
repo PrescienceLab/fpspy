@@ -46,6 +46,13 @@ broken.
 
 Additional environment variables
 
+FPE_MAXCOUNT=k
+   means that only the first k execptions will be recorded
+   this only affects individual mode
+   k=-1 means that there is no limit to how many exceptions
+   will be recorded.  By default, k is about 64,000.
+
+
 FPE_SAMPLE=k
    means that only every kth exception will be recorded
    this only affects individual mode
@@ -60,7 +67,6 @@ FPE_EXCEPT_LIST=list
 	overflow
 	underflow
 	precision (rounding)
-	
 
 FPE_POISSON=A:B
    means that Poisson sampling will be used with the ON period
