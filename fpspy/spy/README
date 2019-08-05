@@ -46,6 +46,9 @@ broken.
 
 Additional environment variables
 
+DISABLE_PTHREADS=yes
+   set for applications not using pthreads
+   otherwise FPE will crash when trying to shim non-existant pthread functions
 FPE_SAMPLE=k
    means that only every kth exception will be recorded
    this only affects individual mode

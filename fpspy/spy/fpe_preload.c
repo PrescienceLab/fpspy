@@ -77,8 +77,8 @@
 
 #include <sys/time.h>
 
-#define DEBUG_OUTPUT 0
-#define NO_OUTPUT 1
+#define DEBUG_OUTPUT 1
+#define NO_OUTPUT 0
 
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
@@ -116,6 +116,7 @@ volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, de
 
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 volatile static int aggressive = 0;
+volatile static int disable_pthreads = 0;
 
 static int (*orig_fork)() = 0;
 static int (*orig_pthread_create)(pthread_t *tid, const pthread_attr_t *attr, void *(*start)(void*), void *arg) = 0;
@@ -843,10 +844,12 @@ int feupdateenv(const fenv_t *envp)
 static int setup_shims()
 {
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { DEBUG("Failed to setup SHIM for " #x "\n");  return -1; }
-
-  SHIMIFY(fork);
+if(disable_pthreads==0){
   SHIMIFY(pthread_create);
   SHIMIFY(pthread_exit);
+
+}
+  SHIMIFY(fork);
   SHIMIFY(signal);
   SHIMIFY(sigaction);
   SHIMIFY(feclearexcept);
@@ -1354,6 +1357,10 @@ static __attribute__((constructor)) void fpe_preload_init(void)
     if (getenv("FPE_AGGRESSIVE") && tolower(getenv("FPE_AGGRESSIVE")[0])=='y') {
       DEBUG("Setting AGGRESSIVE\n");
       aggressive=1;
+    }
+    if (getenv("DISABLE_PTHREADS") && tolower(getenv("DISABLE_PTHREADS")[0])=='y') {
+
+      disable_pthreads=1;
     }
     if (getenv("FPE_SAMPLE")) {
       sample_period = atoi(getenv("FPE_SAMPLE"));
