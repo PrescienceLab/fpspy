@@ -114,6 +114,10 @@ volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, de
 #define MXCSR_FLAG_MASK (mxcsrmask_base<<0)
 #define MXCSR_MASK_MASK (mxcsrmask_base<<7)
 
+static int      control_mxcsr_round_daz_ftz = 0;        // control the rounding bits
+static uint32_t orig_mxcsr_round_daz_ftz_mask;    // captured at start
+static uint32_t our_mxcsr_round_daz_ftz_mask = 0; // as we want to run 0 = round to nearest, no FAZ, no DAZ (IEEE default)
+
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 volatile static int aggressive = 0;
 volatile static int disable_pthreads = 0;
@@ -460,7 +464,7 @@ static void dump_mxcsr(char *pre, ucontext_t *uc)
     MF(um,under);
     MF(pm,precision);
 
-    DEBUG("%s: %s rounding: %s %s%s\n",pre,buf,
+    DEBUG("%s: %s rounding: %s %s %s\n",pre,buf,
 	  m->rounding == 0 ? "nearest" :
 	  m->rounding == 1 ? "negative" :
 	  m->rounding == 2 ? "positive" : "zero",
@@ -931,6 +935,27 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
     DEBUG("Timer reinitialized for %lu us state %s\n",n,s->state==ON ? "ON" : "off");
 }
 
+#define MXCSR_ROUND_DAZ_FTZ_MASK (~(0xe040UL))
+
+static uint32_t get_mxcsr_round_daz_ftz(ucontext_t *uc)
+{
+  uint32_t mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
+  uint32_t mxcsr_round = mxcsr & MXCSR_ROUND_DAZ_FTZ_MASK;
+  DEBUG("mxcsr (0x%08x) round faz dtz at 0x%08x\n", mxcsr, mxcsr_round);
+  //dump_mxcsr("get_mxcsr_round_daz_ftz: ", uc);
+  return mxcsr_round;
+}
+
+static void set_mxcsr_round_daz_ftz(ucontext_t *uc, uint32_t mask)
+{
+  if (control_mxcsr_round_daz_ftz) { 
+    uc->uc_mcontext.fpregs->mxcsr &= MXCSR_ROUND_DAZ_FTZ_MASK;
+    uc->uc_mcontext.fpregs->mxcsr |= mask;
+    DEBUG("mxcsr masked to 0x%08x after round daz ftz update (0x%08x)\n",uc->uc_mcontext.fpregs->mxcsr, mask);
+    //dump_mxcsr("set_mxcsr_round_daz_ftz: ", uc);
+  }
+}
+    
 
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
@@ -944,6 +969,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   if (!mc || mc->state==ABORT) { 
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,0);         // traps disabled
     if (!mc) {
       // this may end badly
@@ -955,8 +981,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   }
 
   if (mc && mc->state==INIT) {
+    orig_mxcsr_round_daz_ftz_mask = get_mxcsr_round_daz_ftz(uc);
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,0);// exceptions unmasked
+    set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,0);         // traps disabled
     mc->state = AWAIT_FPE;
     DEBUG("MXCSR state initialized\n");
@@ -969,8 +997,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     if (maxcount!=-1 && mc->count >= maxcount) { 
       // disable further operation since we've recorded enough
       set_mask_fp_exceptions_context(uc,1); // exceptions masked
+      set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
     } else {
       set_mask_fp_exceptions_context(uc,0); // exceptions unmasked
+      set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
     }
     set_trap_flag_context(uc,0);          // traps disabled
     mc->state = AWAIT_FPE;
@@ -981,6 +1011,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   } else {
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,0);         // traps disabled
     mc->aborting_in_trap = 1;
     abort_operation("Surprise state during sigtrap_handler exec");
@@ -1005,6 +1036,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   if (!mc) {
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,0);         // traps disabled
     abort_operation("Cannot find monitoring context during sigfpe_handler exec");
     return;
@@ -1047,11 +1079,13 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   if (mc->state == AWAIT_FPE) { 
     clear_fp_exceptions_context(uc);      // exceptions cleared
     set_mask_fp_exceptions_context(uc,1); // exceptions masked
+    set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,1);          // traps enabled
     mc->state = AWAIT_TRAP;
   } else {
     clear_fp_exceptions_context(uc);     // exceptions cleared
     set_mask_fp_exceptions_context(uc,1);// exceptions masked
+    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
     set_trap_flag_context(uc,0);         // traps disabled
     abort_operation("Surprise state during sigfpe_handler exec");
   }
@@ -1326,6 +1360,38 @@ static void config_exceptions(char *buf)
 
 }
 
+static void config_round_daz_ftz(char *buf)
+{
+  uint32_t r=0;
+  
+  if (strcasestr(buf,"pos")) {
+    r = 0x4000UL;
+  } else if (strcasestr(buf,"neg")) {
+    r = 0x2000UL;
+  } else if (strcasestr(buf,"zer")) {
+    r = 0x6000UL;
+  } else if (strcasestr(buf,"nea")) {
+    r = 0x0000UL;
+  } else {
+    ERROR("Unknown rounding mode - avoiding rounding control\n");
+    control_mxcsr_round_daz_ftz = 0;
+    return;
+  }
+
+  if (strcasestr(buf,"daz")) {
+    r |= 0x0040UL;
+  }
+  if (strcasestr(buf,"ftz")) {
+    r |= 0x8000UL;
+  }
+
+  control_mxcsr_round_daz_ftz = 1;
+  our_mxcsr_round_daz_ftz_mask = r;
+  
+  DEBUG("Configuring rounding control to 0x%08x\n", our_mxcsr_round_daz_ftz_mask);
+
+}
+    
 
 
 // Called on load of preload library
@@ -1397,6 +1463,9 @@ static __attribute__((constructor)) void fpe_preload_init(void)
     }
     if (getenv("FPE_EXCEPT_LIST")) {
       config_exceptions(getenv("FPE_EXCEPT_LIST"));
+    }
+    if (getenv("FPE_FORCE_ROUNDING")) {
+      config_round_daz_ftz(getenv("FPE_FORCE_ROUNDING"));
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");

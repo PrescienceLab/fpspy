@@ -49,6 +49,7 @@ Additional environment variables
 DISABLE_PTHREADS=yes
    set for applications not using pthreads
    otherwise FPE will crash when trying to shim non-existant pthread functions
+
 FPE_MAXCOUNT=k
    means that only the first k execptions will be recorded
    this only affects individual mode
@@ -98,3 +99,10 @@ make test_sleepy  (real time)
 or
 
 make test_dopey (virtual or profile time)
+
+
+FPE_FORCE_ROUNDING=positive|negative|zero|nearest[;daz][;ftz]
+
+This forces rounding to operate in the noted way (IEEE default is nearest).
+If daz is included, this means all denorms are treated as zeros [Intel specific]
+if ftz is included, this means all denorms are rounded to zeros [Intel specific]
