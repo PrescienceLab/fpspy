@@ -46,9 +46,11 @@ broken.
 
 Additional environment variables
 
-DISABLE_PTHREADS=yes
-   set for applications not using pthreads
-   otherwise FPE will crash when trying to shim non-existant pthread functions
+FPE_DISABLE_PTHREADS=yes    (or DISABLE_PTHREADS=yes)
+   Do not trace newly created pthreads
+   You will also want to set this for any application which
+   does not dynamically link the pthread library.  Otherwise startup
+   will fail when attempting to shim non-existant pthread functions.
 
 FPE_MAXCOUNT=k
    means that only the first k execptions will be recorded
@@ -77,7 +79,7 @@ FPE_POISSON=A:B
    and OFF period chosen from an exponential distro with mean
    B seconds.
 
-- time-based sampling and poisson sampling model
+Time-based sampling and poisson sampling model
 
 FPE_SEED=n
    means the internal random number generator for sampling
@@ -100,6 +102,7 @@ or
 
 make test_dopey (virtual or profile time)
 
+Forced changes in floating point execution environment
 
 FPE_FORCE_ROUNDING=positive|negative|zero|nearest[;daz][;ftz]
 

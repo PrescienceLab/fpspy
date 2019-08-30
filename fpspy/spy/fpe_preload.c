@@ -848,11 +848,11 @@ int feupdateenv(const fenv_t *envp)
 static int setup_shims()
 {
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { DEBUG("Failed to setup SHIM for " #x "\n");  return -1; }
-if(disable_pthreads==0){
-  SHIMIFY(pthread_create);
-  SHIMIFY(pthread_exit);
-
-}
+    
+  if (disable_pthreads==0){
+    SHIMIFY(pthread_create);
+    SHIMIFY(pthread_exit);
+  }
   SHIMIFY(fork);
   SHIMIFY(signal);
   SHIMIFY(sigaction);
@@ -1424,8 +1424,8 @@ static __attribute__((constructor)) void fpe_preload_init(void)
       DEBUG("Setting AGGRESSIVE\n");
       aggressive=1;
     }
-    if (getenv("DISABLE_PTHREADS") && tolower(getenv("DISABLE_PTHREADS")[0])=='y') {
-
+    if ((getenv("FPE_DISABLE_PTHREADS") && tolower(getenv("FPE_DISABLE_PTHREADS")[0])=='y') || 
+	(getenv("DISABLE_PTHREADS") && tolower(getenv("DISABLE_PTHREADS")[0])=='y') ) {
       disable_pthreads=1;
     }
     if (getenv("FPE_SAMPLE")) {
