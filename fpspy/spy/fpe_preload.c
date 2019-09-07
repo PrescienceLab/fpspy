@@ -77,8 +77,8 @@
 
 #include <sys/time.h>
 
-#define DEBUG_OUTPUT 1
-#define NO_OUTPUT 0
+#define DEBUG_OUTPUT 0
+#define NO_OUTPUT 1
 
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
@@ -113,6 +113,10 @@ volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, de
 
 #define MXCSR_FLAG_MASK (mxcsrmask_base<<0)
 #define MXCSR_MASK_MASK (mxcsrmask_base<<7)
+
+// MXCSR used when *we* are executing floating point code
+// All masked, flags zeroed, round nearest, special features off
+#define MXCSR_OURS   0x1f80
 
 static int      control_mxcsr_round_daz_ftz = 0;        // control the rounding bits
 static uint32_t orig_mxcsr_round_daz_ftz_mask;    // captured at start
@@ -248,6 +252,19 @@ typedef union {
 static int  context_lock;
 static monitoring_context_t context[MAX_CONTEXTS];
 
+static uint32_t get_mxcsr()
+{
+  uint32_t val=0;
+  __asm__ __volatile__ ("stmxcsr %0" : "=m"(val) : : "memory" );
+  return val;
+}
+
+static void set_mxcsr(uint32_t val)
+{
+  __asm__ __volatile__ ("ldmxcsr %0" : : "m"(val) : "memory" );
+}
+
+
 static void init_monitoring_contexts()
 {
   memset(context,0,sizeof(context));
@@ -343,12 +360,20 @@ static inline uint64_t get_rand(sampler_state_t *s)
 // by the handler wrapper code, otherwise this will damage things badly
 // this is of course true for Linux user, but not necessarily NK kernel
 // period in us, return in us
+// we also need to be sure that we don't cause an exception ourselves
 static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 {
+    uint32_t oldmxcsr = get_mxcsr();
+    uint64_t ret = 0;
+    
+    set_mxcsr(MXCSR_OURS);
+    // now we are safe to do FP that might itself change flags
+    
     uint64_t r = get_rand(s);
     double u;
     r = r & -2ULL; // make sure that we are not at max
 
+    
     u = ((double) r) / ((double) (-1ULL));
 
     // u = [0,1)
@@ -358,10 +383,16 @@ static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
     // now shape u back into a uint64_t
 
     if (u > ((double)(-1ULL))) {
-	return -1ULL;
+        ret = -1ULL;
     } else {
-	return (uint64_t)u;
+	ret = (uint64_t)u;
     }
+
+    set_mxcsr(oldmxcsr);
+
+    // no more FP after this
+
+    return ret;
 }
 
 
@@ -407,7 +438,6 @@ static int writeall(int fd, void *buf, int len)
   
   return 0;
 }
-
 
 
 static __attribute__((constructor)) void fpe_preload_init(void);
@@ -1169,24 +1199,25 @@ void init_sampler(sampler_state_t *s)
     s->off_mean_us = off_mean_us;
 
     s->state = ON;
-    
+
     if (!timers) {
 	DEBUG("Sampler without timing\n");
 	return;
     }
     
     uint64_t n = next_exp(s,s->on_mean_us);
-    
+
     s->it.it_interval.tv_sec = 0;
     s->it.it_interval.tv_usec = 0;
     s->it.it_value.tv_sec = n / 1000000;
     s->it.it_value.tv_usec = n % 1000000;
-    
 
     if (setitimer(timer_type, &(s->it), NULL)) {
 	ERROR("Failed to set timer?!\n");
     }
+
     DEBUG("Timer initialized for %lu us\n",n);
+    
 }
 
 static int bringup_monitoring_context(int tid)
