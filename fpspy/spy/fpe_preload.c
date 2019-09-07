@@ -938,13 +938,18 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
     // schedule next wakeup
 
     uint64_t n = next_exp(s,s->state==ON ? s->off_mean_us : s->on_mean_us);
+
+    if (!n) {
+      // make sure we do actually wake up again
+      // n = 0 would disable timer...
+      n = 1;
+    }
     
     s->it.it_interval.tv_sec = 0;
     s->it.it_interval.tv_usec = 0;
     s->it.it_value.tv_sec = n / 1000000;
     s->it.it_value.tv_usec = n % 1000000;
-    
-    
+
     // flip state
     s->state = s->state==ON ? OFF : ON ;
 
