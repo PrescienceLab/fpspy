@@ -1289,13 +1289,18 @@ static int bringup()
 
     struct sigaction sa;
 
+    int alarm_sig =
+      timer_type==ITIMER_REAL ? SIGALRM : 
+      timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
+      timer_type==ITIMER_PROF ? SIGPROF : SIGALRM;
+    
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTRAP);
-    sigaddset(&sa.sa_mask, SIGALRM);
+    if (timers) {sigaddset(&sa.sa_mask, alarm_sig);}
     
     ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
 
@@ -1305,7 +1310,7 @@ static int bringup()
     sigemptyset(&sa.sa_mask);
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTRAP);
-    sigaddset(&sa.sa_mask, SIGALRM);
+    if (timers) { sigaddset(&sa.sa_mask, alarm_sig); }
     sigaddset(&sa.sa_mask, SIGFPE); 
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
@@ -1314,7 +1319,7 @@ static int bringup()
     sa.sa_flags |= SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
     sigaddset(&sa.sa_mask, SIGTRAP);
-    sigaddset(&sa.sa_mask, SIGALRM);
+    if (timers) { sigaddset(&sa.sa_mask, alarm_sig);}
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
 
@@ -1327,9 +1332,7 @@ static int bringup()
 	sigemptyset(&sa.sa_mask);
 	sigaddset(&sa.sa_mask, SIGINT);
 	ORIG_IF_CAN(sigaction,
-		    timer_type==ITIMER_REAL ? SIGALRM :
-		    timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
-		    timer_type==ITIMER_PROF ? SIGPROF : SIGALRM,
+		    alarm_sig,
 		    &sa,&oldsa_alrm);
     }
 
