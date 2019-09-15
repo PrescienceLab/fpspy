@@ -80,6 +80,9 @@
 #define DEBUG_OUTPUT 0
 #define NO_OUTPUT 1
 
+#define MAX_US_ON 10000
+#define MAX_US_OFF 1000000
+
 #if DEBUG_OUTPUT
 #define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
 #else 
@@ -943,6 +946,16 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
       // make sure we do actually wake up again
       // n = 0 would disable timer...
       n = 1;
+    }
+
+  if (s->state==OFF && n>MAX_US_ON) { 
+        // about to turn on for too long, limit:
+        n=MAX_US_ON;
+    }
+
+    if (s->state==ON && n>MAX_US_OFF) { 
+        // about to turn off for too long, limit:
+        n=MAX_US_OFF;
     }
     
     s->it.it_interval.tv_sec = 0;
