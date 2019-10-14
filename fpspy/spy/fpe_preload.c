@@ -414,7 +414,7 @@ static void stringify_current_fe_exceptions(char *buf)
   FE_HANDLE(FE_UNDERFLOW);
   if (mxcsr & 0x2) { // denorm
     if (have) {
-      strcat(" ");
+      strcat(buf," ");
     }
     strcat(buf, "FE_DENORM");
     have=1;
