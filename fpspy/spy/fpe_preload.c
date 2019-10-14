@@ -403,6 +403,7 @@ static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 static void stringify_current_fe_exceptions(char *buf)
 {
   int have=0;
+  uint32_t mxcsr = get_mxcsr();
   buf[0]=0;
 
 #define FE_HANDLE(x) if (orig_fetestexcept(x)) { if (!have) { strcat(buf,#x); have=1; } else {strcat(buf," " #x ); } }
@@ -411,6 +412,14 @@ static void stringify_current_fe_exceptions(char *buf)
   FE_HANDLE(FE_INVALID);
   FE_HANDLE(FE_OVERFLOW);
   FE_HANDLE(FE_UNDERFLOW);
+  if (mxcsr & 0x2) { // denorm
+    if (have) {
+      strcat(" ");
+    }
+    strcat(buf, "FE_DENORM");
+    have=1;
+  }
+  
   if (!have) {
     strcpy(buf,"NO_EXCEPTIONS_RECORDED");
   }

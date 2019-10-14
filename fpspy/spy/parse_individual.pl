@@ -16,6 +16,10 @@ $file = shift;
 
 open(RAW,'<:raw', $file) or die "Failed to open $file\n";
 
+#
+# PAD - WE NEED TO DECODE MXCSR denorm here to correctly account for denorms
+#
+#
 
 while (1) {
     $n = read(RAW,$rec, 32);  
@@ -29,7 +33,9 @@ while (1) {
     if (!defined($dec)) { 
 	$dec = "UNDEF"
     }
-
+    if ($mxcsr & 0x2) {
+      $dec.="-FPE_DENORM";
+    }
     print sprintf("%-16ld\t%s\t%016x\t%016x\t%08x\t%08x\t",$time, $dec, $rip,$rsp,$code,$mxcsr);
     print unpack("H*",$instr), "\n";
 }
