@@ -61,10 +61,11 @@ void denorm()
   volatile double x,y,z;
   unsigned long val;
   // smallest normal number
-  // 0 00000000001 00000000000....1
-  // all zero except for bit 52 and bit 0 
-  val =  0x0010000000000001ULL;
+  // 0 00000000001 00000000000....0
+  // all zero except for bit 52
+  val =  0x0010000000000000ULL;
   x=*(double*)&val;
+  x/=2.0;  //x is now a denormalized number
   y=4.0;
   printf("Doing denorm\n");
   z = x/y;
@@ -76,14 +77,14 @@ void underflow()
 {
   volatile double x,y,z;
   unsigned long val;
-  // smallest denormal number
-  // 0 00000000000 00000000000....1
-  // all zero except forand bit 0 
-  val =  0x0000000000000001ULL;
+  // smallest normal number
+  // 0 00000000001 00000000000....0
+  // all zero except for bit 52
+  val =  0x0010000000000000ULL;
   x=*(double*)&val;
-  y=4.0;
+  y=x;
   printf("Doing underflow\n");
-  z = x/y;
+  z = x*y;
   use(z);
   //printf("%.18le / %.18le = %.18le\n", x,y,z);
 }
