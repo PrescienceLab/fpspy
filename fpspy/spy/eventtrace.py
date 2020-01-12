@@ -7,7 +7,8 @@ interval = int(sys.argv[1])
 events = 0
 first_line = sys.stdin.readline()
 first_line=first_line.split()
-initialmillis, prevmillis = int(first_line[0])
+initialmillis= int(first_line[0])
+prevmillis = int(first_line[0])
 with open('trace.csv', 'w+') as csvfile:
     csvwriter = csv.writer(csvfile, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
     csvwriter.writerow(['Time,','Events'])
@@ -17,8 +18,10 @@ with open('trace.csv', 'w+') as csvfile:
         
         events = events + 1
 
-        if(millis-prevmillis > interval)
-            csvwriter.writerow([str(prevmillis-initialmillis)+",",str(events)])
+        if(millis-prevmillis<interval):
+            events = events +1
+        else:
+            csvwriter.writerow([str(prevmillis)+",",str(events)])
             prevmillis=millis
             events=0
-        
+           
