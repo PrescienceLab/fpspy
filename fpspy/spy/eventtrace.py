@@ -11,7 +11,7 @@ with open('trace.csv', 'w+') as csvfile:
     csvwriter.writerow(['Time,','Events'])
     for line in sys.stdin:
         results = line.split()
-        millis = int(results[1])
+        millis = int(results[0])
         if(millis-prevmillis<interval):
             events = events +1
         else:
