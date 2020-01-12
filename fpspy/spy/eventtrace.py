@@ -15,7 +15,7 @@ with open('trace.csv', 'w+') as csvfile:
         initialmillis = millis
         prevmillis = millis
         events = events +1
-        if(prevmillis-millis>=interval):
+        if(millis-prevmillis>=interval):
             csvwriter.writerow([str(prevmillis)+",",str(events)])
             prevmillis=millis
-            events=0s
+            events=0
