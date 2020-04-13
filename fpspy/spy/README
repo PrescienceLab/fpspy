@@ -50,10 +50,10 @@ FPE_DISABLE_PTHREADS=yes    (or DISABLE_PTHREADS=yes)
    Do not trace newly created pthreads
    You will also want to set this for any application which
    does not dynamically link the pthread library.  Otherwise startup
-   will fail when attempting to shim non-existant pthread functions.
+   will fail when attempting to shim non-existent pthread functions.
 
 FPE_MAXCOUNT=k
-   means that only the first k execptions will be recorded
+   means that only the first k exceptions will be recorded
    this only affects individual mode
    k=-1 means that there is no limit to how many exceptions
    will be recorded.  By default, k is about 64,000.
