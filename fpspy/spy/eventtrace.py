@@ -1,3 +1,9 @@
+#
+# Part of FPSpy
+#
+# Copyright (c) 2019 Alex Bernat - see LICENSE
+#
+
 import sys
 import fileinput
 import csv

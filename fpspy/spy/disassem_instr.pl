@@ -1,5 +1,11 @@
 #!/usr/bin/perl -w
 
+#
+# Part of FPSpy
+#
+# Copyright (c) 2018 Peter Dinda - see LICENSE
+#
+
 $#ARGV==-1 or $#ARGV==0 or die "usage: decode_instr.pl hexbytes or < hexbytes\n";
 
 if ($#ARGV==0) {

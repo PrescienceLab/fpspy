@@ -1,5 +1,12 @@
 #!/usr/bin/perl -w
 
+#
+# Part of FPSpy
+#
+# Copyright (c) 2018 Peter Dinda - see LICENSE
+#
+
+
 $#ARGV==0 or die "usage: timestamps.pl fpemonfile\n";
 
 $f = shift;

@@ -1,9 +1,11 @@
 /*
 
+  Part of FPSpy
+
   Preload library with floating point exception interception 
   aggregation via FPE sticky behavior and trap-and-emulate
 
-  Copyright (c) 2017 Peter A. Dinda
+  Copyright (c) 2017 Peter A. Dinda - see LICENSE
 
 
   This code does the following:

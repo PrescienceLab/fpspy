@@ -1,6 +1,15 @@
 #include <stdio.h>
 #include "libtrace.h"
 
+/*
+
+  Part of FPSpy
+
+  Copyright (c) 2017 Peter A. Dinda - see LICENSE
+
+*/
+
+
 int main(int argc, char *argv[])
 {
   if (argc!=2) {

@@ -1,3 +1,10 @@
+#
+# Part of FPSpy
+#
+# Copyright (c) 2019 Alex Bernat - see LICENSE
+#
+
+
 import os
 import sys
 import commands

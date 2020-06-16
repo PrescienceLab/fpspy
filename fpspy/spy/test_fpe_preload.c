@@ -1,8 +1,10 @@
 /*
 
+  Part of FPSpy
+
   Test code for floating point exception interception
 
-  Copyright (c) 2017 Peter A. Dinda
+  Copyright (c) 2017 Peter A. Dinda - see LICENSE
 
 */
 

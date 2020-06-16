@@ -1,3 +1,12 @@
+/*
+
+  Part of FPSpy
+
+  Copyright (c) 2017 Peter A. Dinda - see LICENSE
+
+*/
+
+
 #include <stdlib.h>
 
 #define N (1024ULL*1024ULL*256ULL)

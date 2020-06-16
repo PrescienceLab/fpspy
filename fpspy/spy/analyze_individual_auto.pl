@@ -1,5 +1,12 @@
 #!/usr/bin/perl -w
 
+#
+# Part of FPSpy
+#
+# Copyright (c) 2018 Peter Dinda - see LICENSE
+#
+
+
 $#ARGV==0 or $#ARGV==1 or die "analyze_individual.pl file [disassem]\n";
 
 $file = shift;

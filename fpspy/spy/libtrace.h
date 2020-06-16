@@ -1,7 +1,9 @@
+//  Part of FPSpy
+//
 //  Preload library with floating point exception interception 
 //  aggregation via FPE sticky behavior and trap-and-emulate
 //
-//  Copyright (c) 2018 Peter A. Dinda
+//  Copyright (c) 2018 Peter A. Dinda - see LICENSE
 
 #ifndef __LIB_TRACE
 #define __LIB_TRACE

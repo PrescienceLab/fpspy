@@ -1,5 +1,9 @@
+#  Part of FPSpy
+#
 #  Preload library with floating point exception interception 
 #  aggregation via FPE sticky behavior and trap-and-emulate
+#
+#  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
 all: fpe_preload.so test_fpe_preload trace_print
@@ -26,7 +30,6 @@ clean:
 	-rm __sleepy.*fpemon
 	-rm __dopey.*.fpemon
 	-rm dopey sleepy
-	-rm mpfr_test
 
 test: fpe_preload.so test_fpe_preload
 	@echo ==================================
@@ -76,7 +79,4 @@ dopey: dopey.c
 test_dopey: fpe_preload.so dopey
 	@echo ==================================
 	-FPE_MODE=individual LD_PRELOAD=./fpe_preload.so FPE_POISSON=100000:100000 FPE_TIMER=virtual ./dopey
-
-mpfr_test: mpfr_test.c
-	gcc -static -O2 -Wall -fno-strict-aliasing -fPIC mpfr_test.c -lm -lmpfr -lgmp -o mpfr_test
 

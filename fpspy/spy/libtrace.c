@@ -12,10 +12,12 @@
 
 #include "libtrace.h"
 
+//  Part of FPSpy
+//
 //  Preload library with floating point exception interception 
 //  aggregation via FPE sticky behavior and trap-and-emulate
 //
-//  Copyright (c) 2018 Peter A. Dinda
+//  Copyright (c) 2018 Peter A. Dinda - see LICENSE
 
 trace_t *trace_attach(char *file)
 {
