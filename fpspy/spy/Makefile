@@ -6,7 +6,7 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-all: fpe_preload.so test_fpe_preload trace_print
+all: fpe_preload.so test_fpe_preload trace_print test_fpspy_rounding
 
 
 fpe_preload.so: fpe_preload.c trace_record.h
@@ -22,11 +22,14 @@ libtrace.a: libtrace.c libtrace.h trace_record.h
 trace_print: libtrace.a trace_print.c
 	gcc -O2 -Wall -fno-strict-aliasing trace_print.c libtrace.a -o trace_print
 
+test_fpspy_rounding: test_fpspy_rounding.c
+	gcc -O0 -Wall -o test_fpspy_rounding test_fpspy_rounding.c -lm	
 
 
 clean:
-	-rm fpe_preload.so test_fpe_preload libtrace.o libtrace.a trace_print
+	-rm fpe_preload.so test_fpe_preload test_fpspy_rounding libtrace.o libtrace.a trace_print
 	-rm __test_fpe_preload.*.fpemon
+	-rm __test_fpspy_rounding.*.fpemon
 	-rm __sleepy.*fpemon
 	-rm __dopey.*.fpemon
 	-rm dopey sleepy
@@ -79,4 +82,3 @@ dopey: dopey.c
 test_dopey: fpe_preload.so dopey
 	@echo ==================================
 	-FPE_MODE=individual LD_PRELOAD=./fpe_preload.so FPE_POISSON=100000:100000 FPE_TIMER=virtual ./dopey
-
