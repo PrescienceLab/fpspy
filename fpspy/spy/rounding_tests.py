@@ -106,7 +106,7 @@ if(sys.argv[1]=="mpi"):
 
 elif(sys.argv[1]=="nompi"):
 	print("running in non-mpi mode")
-    print("running baseline test")
+    	print("running baseline test")
         os.system("FPE_MODE=individual FPE_AGGRESSIVE=yes FPE_EXCEPT_LIST=invalid LD_PRELOAD=./fpe_preload.so "+program_command)
         os.system("mkdir rounding_baseline")
         os.system("mv " +output_file_match+" rounding_baseline")
