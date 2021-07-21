@@ -79,8 +79,8 @@
 
 #include <sys/time.h>
 
-#define DEBUG_OUTPUT 0
-#define NO_OUTPUT 1
+#define DEBUG_OUTPUT 1
+#define NO_OUTPUT 0
 
 #define MAX_US_ON 10000
 #define MAX_US_OFF 1000000
@@ -1001,7 +1001,7 @@ static uint32_t get_mxcsr_round_daz_ftz(ucontext_t *uc)
   uint32_t mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
   uint32_t mxcsr_round = mxcsr & MXCSR_ROUND_DAZ_FTZ_MASK;
   DEBUG("mxcsr (0x%08x) round faz dtz at 0x%08x\n", mxcsr, mxcsr_round);
-  //dump_mxcsr("get_mxcsr_round_daz_ftz: ", uc);
+  dump_mxcsr("get_mxcsr_round_daz_ftz: ", uc);
   return mxcsr_round;
 }
 
@@ -1011,7 +1011,7 @@ static void set_mxcsr_round_daz_ftz(ucontext_t *uc, uint32_t mask)
     uc->uc_mcontext.fpregs->mxcsr &= MXCSR_ROUND_DAZ_FTZ_MASK;
     uc->uc_mcontext.fpregs->mxcsr |= mask;
     DEBUG("mxcsr masked to 0x%08x after round daz ftz update (0x%08x)\n",uc->uc_mcontext.fpregs->mxcsr, mask);
-    //dump_mxcsr("set_mxcsr_round_daz_ftz: ", uc);
+    dump_mxcsr("set_mxcsr_round_daz_ftz: ", uc);
   }
 }
     
