@@ -86,7 +86,7 @@
 #define MAX_US_OFF 1000000
 
 #if DEBUG_OUTPUT
-#define DEBUG(S, ...) fprintf(stderr, "fpe_preload: debug(%8d): " S, gettid(), ##__VA_ARGS__)
+#define DEBUG(S, ...) fprintf(stderr, "fpspy: debug(%8d): " S, gettid(), ##__VA_ARGS__)
 #else 
 #define DEBUG(S, ...) 
 #endif
@@ -95,8 +95,8 @@
 #define INFO(S, ...) 
 #define ERROR(S, ...)
 #else
-#define INFO(S, ...) fprintf(stderr,  "fpe_preload: info(%8d): " S, gettid(), ##__VA_ARGS__)
-#define ERROR(S, ...) fprintf(stderr, "fpe_preload: ERROR(%8d): " S, gettid(), ##__VA_ARGS__)
+#define INFO(S, ...) fprintf(stderr,  "fpspy: info(%8d): " S, gettid(), ##__VA_ARGS__)
+#define ERROR(S, ...) fprintf(stderr, "fpspy: ERROR(%8d): " S, gettid(), ##__VA_ARGS__)
 #endif
 
 volatile static int inited=0;
@@ -456,7 +456,7 @@ static int writeall(int fd, void *buf, int len)
 }
 
 
-static __attribute__((constructor)) void fpe_preload_init(void);
+static __attribute__((constructor)) void fpspy_init(void);
 
 #if DEBUG_OUTPUT
 
@@ -548,8 +548,8 @@ static void abort_operation(char *reason)
 {
   if (!inited) {
     DEBUG("Initializing before abortingi\n");
-    fpe_preload_init();
-    DEBUG("Done with fpe_preload_init()\n");
+    fpspy_init();
+    DEBUG("Done with fpspy_init()\n");
   }
 
   if (!aborted) {
@@ -1153,7 +1153,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   DEBUG("FPE done\n");
 }
 
-static __attribute__((destructor)) void fpe_preload_deinit(void);
+static __attribute__((destructor)) void fpspy_deinit(void);
 
 
 static void sigint_handler(int sig, siginfo_t *si,  void *priv)
@@ -1163,7 +1163,7 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
 
 
   if (oldsa_int.sa_sigaction) { 
-    fpe_preload_deinit(); // dump everything out
+    fpspy_deinit(); // dump everything out
     // invoke underlying handler
     oldsa_int.sa_sigaction(sig,si,priv);
   } else {
@@ -1460,7 +1460,7 @@ static void config_round_daz_ftz(char *buf)
 
 
 // Called on load of preload library
-static __attribute__((constructor)) void fpe_preload_init(void) 
+static __attribute__((constructor)) void fpspy_init(void) 
 {
 
   INFO("init\n");
@@ -1570,7 +1570,7 @@ static void handle_aggregate_thread_exit()
 
     
 // Called on unload of preload library
-static __attribute__((destructor)) void fpe_preload_deinit(void) 
+static __attribute__((destructor)) void fpspy_deinit(void) 
 { 
   // destroy the tracer thread
   DEBUG("deinit\n");
