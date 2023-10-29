@@ -172,10 +172,12 @@ static inline uint64_t __attribute__((always_inline)) rdtsc(void)
   return lo | ((uint64_t)(hi) << 32);
 }
 
+/*
 static inline int gettid()
 {
   return syscall(SYS_gettid);
 }
+*/
 
 typedef struct rand_state {
     uint64_t xi;
@@ -458,7 +460,7 @@ static __attribute__((constructor)) void fpe_preload_init(void);
 
 #if DEBUG_OUTPUT
 
-static void dump_rflags(char *pre, ucontext_t *uc)
+__attribute__((unused)) static void dump_rflags(char *pre, ucontext_t *uc)
 {
     char buf[256];
     
