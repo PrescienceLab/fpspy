@@ -1,0 +1,2 @@
+export ARCH=x64
+export PATH=`pwd`/bin/$ARCH:`pwd`/scripts:$PATH

@@ -145,13 +145,13 @@ int do_work()
 
   // if we abort here, we should have some partial output in the logs
   
-  if (getenv("TEST_FPE_BREAK_GENERAL_SIGNAL")) {
+  if (getenv("TEST_FPSPY_BREAK_GENERAL_SIGNAL")) {
     signal(SIGUSR1,handler);
   }
-  if (getenv("TEST_FPE_BREAK_FPE_SIGNAL")) {
+  if (getenv("TEST_FPSPY_BREAK_FPE_SIGNAL")) {
     signal(SIGFPE,handler);
   }
-  if (getenv("TEST_FPE_BREAK_FE_FUNC")) {
+  if (getenv("TEST_FPSPY_BREAK_FE_FUNC")) {
     feclearexcept(FE_ALL_EXCEPT);
   }
 
@@ -185,7 +185,7 @@ int main(int argc, char *argv[], char *envp[])
     return 0;
   }
 
-  printf("Hello from test_fpe_preload\n");
+  printf("Hello from test_fpspy\n");
   printf("Running tests in normal mode\n");
   do_work();
 
@@ -247,7 +247,7 @@ int main(int argc, char *argv[], char *envp[])
     printf("Joined thread %d\n", i);
   }
 
-  printf("Goodbye from test_fpe_preload\n");
+  printf("Goodbye from test_fpspy\n");
   return 0;
 }
   

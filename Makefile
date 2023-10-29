@@ -6,79 +6,102 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-all: fpe_preload.so test_fpe_preload trace_print test_fpspy_rounding
+ARCH=x64
+#ARCH=arm64
+
+CC = gcc
+LD = ld
+AR = ar
+
+CFLAGS_FPSPY = -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/arch/$(ARCH)
+LDFLAGS_FPSPY =  -lm -ldl
+
+CFLAGS_TOOL = -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/arch/$(ARCH)
+LDFLAGS_TOOL =  -lm
+
+CFLAGS_TEST = -O2 -Wall -fno-strict-aliasing -pthread
+LDFLAGS_TEST =  -lm 
+
+CFLAGS_ROUNDING = -O0 -Wall 
+LDFLAGS_ROUNDING =  -lm
 
 
-fpe_preload.so: fpe_preload.c trace_record.h
-	gcc -O2 -Wall -fno-strict-aliasing -fPIC -shared fpe_preload.c -lm -ldl  -o fpe_preload.so
+all: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/trace_print bin/$(ARCH)/test_fpspy_rounding bin/$(ARCH)/sleepy bin/$(ARCH)/dopey
 
-test_fpe_preload: test_fpe_preload.c
-	gcc -O2 -Wall -fno-strict-aliasing -pthread test_fpe_preload.c -lm -o test_fpe_preload
 
-libtrace.a: libtrace.c libtrace.h trace_record.h
-	gcc -O2 -Wall -fno-strict-aliasing -c libtrace.c -o libtrace.o
-	ar ruv libtrace.a libtrace.o
 
-trace_print: libtrace.a trace_print.c
-	gcc -O2 -Wall -fno-strict-aliasing trace_print.c libtrace.a -o trace_print
 
-test_fpspy_rounding: test_fpspy_rounding.c
-	gcc -O0 -Wall -o test_fpspy_rounding test_fpspy_rounding.c -lm	
+bin/$(ARCH)/fpspy.so: src/fpspy.c include/trace_record.h
+	$(CC) $(CFLAGS_FPSPY) src/fpspy.c $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
+
+bin/$(ARCH)/test_fpspy: test/test_fpspy.c
+	$(CC) $(CFLAGS_TEST) test/test_fpspy.c $(LDFLAGS_TEST) -o bin/$(ARCH)/test_fpspy
+
+lib/$(ARCH)/libtrace.a: src/libtrace.c include/libtrace.h include/trace_record.h
+	$(CC) $(CFLAGS_TOOL) -c src/libtrace.c -o lib/$(ARCH)/libtrace.o
+	$(AR) ruv lib/$(ARCH)/libtrace.a lib/$(ARCH)/libtrace.o
+	rm lib/$(ARCH)/libtrace.o
+
+bin/$(ARCH)/trace_print: lib/$(ARCH)/libtrace.a src/trace_print.c
+	$(CC) $(CFLAGS_TOOL) src/trace_print.c lib/$(ARCH)/libtrace.a $(LDFLAGS_TOOL) -o bin/$(ARCH)/trace_print
+
+bin/$(ARCH)/test_fpspy_rounding: test/test_fpspy_rounding.c
+	$(CC) $(CFLAGS_ROUNDING) test/test_fpspy_rounding.c $(LDFLAGS_ROUNDING) -o bin/$(ARCH)/test_fpspy_rounding 
 
 
 clean:
-	-rm fpe_preload.so test_fpe_preload test_fpspy_rounding libtrace.o libtrace.a trace_print
-	-rm __test_fpe_preload.*.fpemon
+	-rm bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/test_fpspy_rounding lib/$(ARCH)/libtrace.o lib/$(ARCH)/libtrace.a bin/$(ARCH)/trace_print
+	-rm __test_fpspy.*.fpemon
 	-rm __test_fpspy_rounding.*.fpemon
 	-rm __sleepy.*fpemon
 	-rm __dopey.*.fpemon
-	-rm dopey sleepy
+	-rm bin/$(ARCH)/*dopey bin/$(ARCH)/*sleepy
 
-test: fpe_preload.so test_fpe_preload
+test: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-FPE_MODE=individual LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-FPE_MODE=aggregate LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-FPSPY_MODE=aggregate LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-FPE_MODE=individual FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-FPSPY_MODE=individual FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-FPE_MODE=aggregate FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-FPSPY_MODE=aggregate FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_GENERAL_SIGNAL=1 FPE_MODE=individual LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_GENERAL_SIGNAL=1 FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_GENERAL_SIGNAL=1 FPE_MODE=aggregate LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_GENERAL_SIGNAL=1 FPSPY_MODE=aggregate LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_GENERAL_SIGNAL=1 FPE_MODE=individual FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_GENERAL_SIGNAL=1 FPSPY_MODE=individual FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_GENERAL_SIGNAL=1 FPE_MODE=aggregate FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_GENERAL_SIGNAL=1 FPSPY_MODE=aggregate FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FPE_SIGNAL=1 FPE_MODE=individual LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FPE_SIGNAL=1 FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FPE_SIGNAL=1 FPE_MODE=aggregate LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FPE_SIGNAL=1 FPSPY_MODE=aggregate LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FPE_SIGNAL=1 FPE_MODE=individual FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FPE_SIGNAL=1 FPSPY_MODE=individual FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FPE_SIGNAL=1 FPE_MODE=aggregate FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FPE_SIGNAL=1 FPSPY_MODE=aggregate FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FE_FUNC=1 FPE_MODE=individual LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FE_FUNC=1 FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FE_FUNC=1 FPE_MODE=aggregate LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FE_FUNC=1 FPSPY_MODE=aggregate LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FE_FUNC=1 FPE_MODE=individual FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FE_FUNC=1 FPSPY_MODE=individual FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
-	-TEST_FPE_BREAK_FE_FUNC=1 FPE_MODE=aggregate FPE_AGGRESSIVE=yes LD_PRELOAD=./fpe_preload.so ./test_fpe_preload
+	-TEST_FPSPY_BREAK_FE_FUNC=1 FPSPY_MODE=aggregate FPSPY_AGGRESSIVE=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so ./bin/$(ARCH)/test_fpspy
 	@echo ==================================
 
-sleepy: sleepy.c
-	gcc -pthread sleepy.c -o sleepy
+bin/$(ARCH)/sleepy: test/sleepy.c
+	$(CC) $(CFLAGS_TEST) test/sleepy.c $(LDFLAGS_TEST) -o bin/$(ARCH)/sleepy
 
-test_sleepy: fpe_preload.so sleepy
+test_sleepy: bin/$(ARCH)/fpspy.so bin/$(ARCH)/sleepy
 	@echo ==================================
-	-FPE_MODE=individual LD_PRELOAD=./fpe_preload.so FPE_POISSON=100000:100000 FPE_TIMER=real ./sleepy
+	-FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=real ./bin/$(ARCH)/sleepy
 
-dopey: dopey.c
-	gcc -pthread dopey.c -o dopey
+bin/$(ARCH)/dopey: test/dopey.c
+	$(CC) $(CFLAGS_TEST) test/dopey.c $(LDFLAGS_TEST) -o bin/$(ARCH)/dopey
 
-test_dopey: fpe_preload.so dopey
+test_dopey: bin/$(ARCH)/fpspy.so bin/$(ARCH)/dopey
 	@echo ==================================
-	-FPE_MODE=individual LD_PRELOAD=./fpe_preload.so FPE_POISSON=100000:100000 FPE_TIMER=virtual ./dopey
+	-FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=virtual ./bin/$(ARCH)/dopey

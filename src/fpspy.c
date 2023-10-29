@@ -1465,72 +1465,72 @@ static __attribute__((constructor)) void fpe_preload_init(void)
 
   INFO("init\n");
   if (!inited) { 
-    if (getenv("FPE_MODE")) {
-      if (!strcasecmp(getenv("FPE_MODE"),"individual")) { 
+    if (getenv("FPSPY_MODE")) {
+      if (!strcasecmp(getenv("FPSPY_MODE"),"individual")) { 
 	mode=INDIVIDUAL;
 	DEBUG("Setting INDIVIDUAL mode\n");
       } else {
-	if (!strcasecmp(getenv("FPE_MODE"),"aggregate")) {
+	if (!strcasecmp(getenv("FPSPY_MODE"),"aggregate")) {
 	  mode=AGGREGATE;
 	  DEBUG("Setting AGGREGATE mode\n");
 	} else {
-	  ERROR("FPE_MODE is given, but mode %s does not make sense\n",getenv("FPE_MODE"));
+	  ERROR("FPSPY_MODE is given, but mode %s does not make sense\n",getenv("FPSPY_MODE"));
 	  abort();
 	}
       } 
     } else {
       mode=AGGREGATE;
-      DEBUG("No FPE_MODE is given, so assuming AGGREGATE mode\n");
+      DEBUG("No FPSPY_MODE is given, so assuming AGGREGATE mode\n");
     }
-    if (getenv("FPE_MAXCOUNT")) { 
-      maxcount = atoi(getenv("FPE_MAXCOUNT"));
+    if (getenv("FPSPY_MAXCOUNT")) { 
+      maxcount = atoi(getenv("FPSPY_MAXCOUNT"));
     }
-    if (getenv("FPE_AGGRESSIVE") && tolower(getenv("FPE_AGGRESSIVE")[0])=='y') {
+    if (getenv("FPSPY_AGGRESSIVE") && tolower(getenv("FPSPY_AGGRESSIVE")[0])=='y') {
       DEBUG("Setting AGGRESSIVE\n");
       aggressive=1;
     }
-    if ((getenv("FPE_DISABLE_PTHREADS") && tolower(getenv("FPE_DISABLE_PTHREADS")[0])=='y') || 
+    if ((getenv("FPSPY_DISABLE_PTHREADS") && tolower(getenv("FPSPY_DISABLE_PTHREADS")[0])=='y') || 
 	(getenv("DISABLE_PTHREADS") && tolower(getenv("DISABLE_PTHREADS")[0])=='y') ) {
       disable_pthreads=1;
     }
-    if (getenv("FPE_SAMPLE")) {
-      sample_period = atoi(getenv("FPE_SAMPLE"));
+    if (getenv("FPSPY_SAMPLE")) {
+      sample_period = atoi(getenv("FPSPY_SAMPLE"));
       DEBUG("Setting sample period to %d\n", sample_period);
     }
-    if (getenv("FPE_POISSON")) {
-	if (sscanf(getenv("FPE_POISSON"),"%lu:%lu",&on_mean_us,&off_mean_us)!=2) {
-	    ERROR("unsupported FPE_POISSON arguments\n");
+    if (getenv("FPSPY_POISSON")) {
+	if (sscanf(getenv("FPSPY_POISSON"),"%lu:%lu",&on_mean_us,&off_mean_us)!=2) {
+	    ERROR("unsupported FPSPY_POISSON arguments\n");
 	    return;
 	} else {
 	    DEBUG("Setting Poisson sampling %lu us off %lu us on\n",on_mean_us, off_mean_us);
 	    timers = 1;
 	}
     }
-    if (getenv("FPE_TIMER")) {
-	if (!strcasecmp(getenv("FPE_TIMER"),"virtual")) {
+    if (getenv("FPSPY_TIMER")) {
+	if (!strcasecmp(getenv("FPSPY_TIMER"),"virtual")) {
 	    timer_type = ITIMER_VIRTUAL;
 	    DEBUG("Using virtual timer\n");
-	} else if (!strcasecmp(getenv("FPE_TIMER"),"real")) {
+	} else if (!strcasecmp(getenv("FPSPY_TIMER"),"real")) {
 	    timer_type = ITIMER_REAL;
 	    DEBUG("Using real timer\n");
-	} else if (!strcasecmp(getenv("FPE_TIMER"),"prof")) {
+	} else if (!strcasecmp(getenv("FPSPY_TIMER"),"prof")) {
 	    timer_type = ITIMER_PROF;
 	    DEBUG("Using profiling timer\n");
 	} else {
-	    ERROR("Unknown FPE_TIMER=%s type\n",getenv("FPE_TIMER"));
+	    ERROR("Unknown FPSPY_TIMER=%s type\n",getenv("FPSPY_TIMER"));
 	    return;
 	}
     }
-    if (getenv("FPE_SEED")) {
-	random_seed = atol(getenv("FPE_SEED"));
+    if (getenv("FPSPY_SEED")) {
+	random_seed = atol(getenv("FPSPY_SEED"));
     } else {
 	random_seed = -1; // random selection at mc start
     }
-    if (getenv("FPE_EXCEPT_LIST")) {
-      config_exceptions(getenv("FPE_EXCEPT_LIST"));
+    if (getenv("FPSPY_EXCEPT_LIST")) {
+      config_exceptions(getenv("FPSPY_EXCEPT_LIST"));
     }
-    if (getenv("FPE_FORCE_ROUNDING")) {
-      config_round_daz_ftz(getenv("FPE_FORCE_ROUNDING"));
+    if (getenv("FPSPY_FORCE_ROUNDING")) {
+      config_round_daz_ftz(getenv("FPSPY_FORCE_ROUNDING"));
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");
