@@ -45,17 +45,7 @@ lib/$(ARCH)/libtrace.a: src/libtrace.c include/libtrace.h include/trace_record.h
 bin/$(ARCH)/trace_print: lib/$(ARCH)/libtrace.a src/trace_print.c
 	$(CC) $(CFLAGS_TOOL) src/trace_print.c lib/$(ARCH)/libtrace.a $(LDFLAGS_TOOL) -o bin/$(ARCH)/trace_print
 
-bin/$(ARCH)/test_fpspy_rounding: test/test_fpspy_rounding.c
-	$(CC) $(CFLAGS_ROUNDING) test/test_fpspy_rounding.c $(LDFLAGS_ROUNDING) -o bin/$(ARCH)/test_fpspy_rounding 
 
-
-clean:
-	-rm bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/test_fpspy_rounding lib/$(ARCH)/libtrace.o lib/$(ARCH)/libtrace.a bin/$(ARCH)/trace_print
-	-rm __test_fpspy.*.fpemon
-	-rm __test_fpspy_rounding.*.fpemon
-	-rm __sleepy.*fpemon
-	-rm __dopey.*.fpemon
-	-rm bin/$(ARCH)/*dopey bin/$(ARCH)/*sleepy
 
 test: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy
 	@echo ==================================
@@ -97,11 +87,58 @@ bin/$(ARCH)/sleepy: test/sleepy.c
 
 test_sleepy: bin/$(ARCH)/fpspy.so bin/$(ARCH)/sleepy
 	@echo ==================================
-	-FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=real ./bin/$(ARCH)/sleepy
+	-FPSPY_MODE=individual FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=real ./bin/$(ARCH)/sleepy
 
 bin/$(ARCH)/dopey: test/dopey.c
 	$(CC) $(CFLAGS_TEST) test/dopey.c $(LDFLAGS_TEST) -o bin/$(ARCH)/dopey
 
 test_dopey: bin/$(ARCH)/fpspy.so bin/$(ARCH)/dopey
 	@echo ==================================
-	-FPSPY_MODE=individual LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=virtual ./bin/$(ARCH)/dopey
+	-FPSPY_MODE=individual  FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=virtual ./bin/$(ARCH)/dopey
+
+bin/$(ARCH)/test_fpspy_rounding: test/test_fpspy_rounding.c
+	$(CC) $(CFLAGS_ROUNDING) test/test_fpspy_rounding.c $(LDFLAGS_ROUNDING) -o bin/$(ARCH)/test_fpspy_rounding 
+
+
+test_rounding: bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING=positive bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING=negative bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING=zero bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING=nearest bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="positive;daz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="negative;daz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="zero;daz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="nearest;daz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="positive;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="negative;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="zero;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="nearest;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="positive;daz;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="negative;daz;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="zero;daz;ftz" bin/$(ARCH)/test_fpspy_rounding
+	@echo ==================================
+	-FPSPY_MODE=aggregate FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_FORCE_ROUNDING="nearest;daz;ftz" bin/$(ARCH)/test_fpspy_rounding
+
+clean:
+	-rm bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/test_fpspy_rounding lib/$(ARCH)/libtrace.o lib/$(ARCH)/libtrace.a bin/$(ARCH)/trace_print
+	-rm __test_fpspy.*.fpemon
+	-rm __test_fpspy_rounding.*.fpemon
+	-rm __sleepy.*fpemon
+	-rm __dopey.*.fpemon
+	-rm bin/$(ARCH)/*dopey bin/$(ARCH)/*sleepy
+

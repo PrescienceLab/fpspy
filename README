@@ -134,6 +134,11 @@ This forces rounding to operate in the noted way (IEEE default is nearest).
 If daz is included, this means all denorms are treated as zeros [Intel specific]
 if ftz is included, this means all denorms are rounded to zeros [Intel specific]
 
+To get a sense of how FPSPY_FORCE_ROUNDING operates, you can
+also run:
+
+make test_rounding
+
 
 Output and Analysis Scripts
 ---------------------------
