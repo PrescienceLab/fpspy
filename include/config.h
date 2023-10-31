@@ -1,0 +1,5 @@
+#define DEBUG_OUTPUT 1
+#define NO_OUTPUT 0
+
+#define MAX_US_ON 10000
+#define MAX_US_OFF 1000000

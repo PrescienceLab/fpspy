@@ -75,29 +75,14 @@
 
 #include <math.h>
 
+#include "config.h"
+#include "debug.h"
+#include "arch.h"
 #include "trace_record.h"
 
 #include <sys/time.h>
 
-#define DEBUG_OUTPUT 1
-#define NO_OUTPUT 0
 
-#define MAX_US_ON 10000
-#define MAX_US_OFF 1000000
-
-#if DEBUG_OUTPUT
-#define DEBUG(S, ...) fprintf(stderr, "fpspy: debug(%8d): " S, gettid(), ##__VA_ARGS__)
-#else 
-#define DEBUG(S, ...) 
-#endif
-
-#if NO_OUTPUT
-#define INFO(S, ...) 
-#define ERROR(S, ...)
-#else
-#define INFO(S, ...) fprintf(stderr,  "fpspy: info(%8d): " S, gettid(), ##__VA_ARGS__)
-#define ERROR(S, ...) fprintf(stderr, "fpspy: ERROR(%8d): " S, gettid(), ##__VA_ARGS__)
-#endif
 
 volatile static int inited=0;
 volatile static int aborted=0; // set if the target is doing its own FPE processing
@@ -110,22 +95,14 @@ volatile static int timers=0; // are using timing-based sampling?
 // used for poisson sampler
 volatile static uint64_t on_mean_us, off_mean_us;
 
-// for testing with sleep codes
+// user for timer config
 volatile static int timer_type = ITIMER_REAL;
 
 volatile static int exceptmask=FE_ALL_EXCEPT; // which C99 exceptions to handle, default all
-volatile static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, default all (using base zero)
 
-#define MXCSR_FLAG_MASK (mxcsrmask_base<<0)
-#define MXCSR_MASK_MASK (mxcsrmask_base<<7)
-
-// MXCSR used when *we* are executing floating point code
-// All masked, flags zeroed, round nearest, special features off
-#define MXCSR_OURS   0x1f80
-
-static int      control_mxcsr_round_daz_ftz = 0;        // control the rounding bits
-static uint32_t orig_mxcsr_round_daz_ftz_mask;    // captured at start
-static uint32_t our_mxcsr_round_daz_ftz_mask = 0; // as we want to run 0 = round to nearest, no FAZ, no DAZ (IEEE default)
+static int      control_round_config = 0; // control rounding and related (daz/ftz)
+static uint32_t orig_round_config;        // captured at start
+static uint32_t our_round_config = 0;     // as we want to run 
 
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;
 volatile static int aggressive = 0;
@@ -165,13 +142,6 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int, oldsa_alrm;
 #define MAX_CONTEXTS 1024
 
 
-static inline uint64_t __attribute__((always_inline)) rdtsc(void)
-{
-  uint32_t lo, hi;
-  asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
-  return lo | ((uint64_t)(hi) << 32);
-}
-
 /*
 static inline int gettid()
 {
@@ -201,76 +171,13 @@ typedef struct monitoring_context {
   int tid;
   int fd; 
   uint64_t count;
+  uint64_t trap_state;       // for use by the architectural trap mechanism
   sampler_state_t sampler;   // used only when sampling is on
 } monitoring_context_t;
 
-typedef union  {
-    uint32_t val;
-    struct {
-	uint8_t ie:1;  // detected nan
-	uint8_t de:1;  // detected denormal
-	uint8_t ze:1;  // detected divide by zero
-	uint8_t oe:1;  // detected overflow (infinity)
-	uint8_t ue:1;  // detected underflow (zero)
-	uint8_t pe:1;  // detected precision (rounding)
-	uint8_t daz:1; // denormals become zeros
-	uint8_t im:1;  // mask nan exceptions
-	uint8_t dm:1;  // mask denorm exceptions
-	uint8_t zm:1;  // mask zero exceptions
-	uint8_t om:1;  // mask overflow exceptions
-	uint8_t um:1;  // mask underflow exceptions
-	uint8_t pm:1;  // mask precision exceptions
-	uint8_t rounding:2; // rounding (toward 00=>nearest,01=>negative,10=>positive,11=>zero)
-	uint8_t fz:1;  // flush to zero (denormals are zeros)
-	uint16_t rest;  
-    } __attribute__((packed));
-} __attribute__((packed)) mxcsr_t;
-
-typedef union {
-    uint64_t val;
-    struct {
-	// note that not all of these are visible in user mode
-	uint8_t cf:1;    // detected carry
-	uint8_t res1:1;  // reserved MB1
-	uint8_t pf:1;    // detected parity
-	uint8_t res2:1;  // reserved
-	uint8_t af:1;    // detected adjust (BCD math)
-	uint8_t res3:1;  // resered
-	uint8_t zf:1;    // detected zero
-	uint8_t sf:1;    // detected negative
-	uint8_t tf:1;    // trap enable flag (single stepping)
-	uint8_t intf:1;    // interrupt enable flag
-	uint8_t df:1;    // direction flag (1=down);
-	uint8_t of:1;    // detected overflow
-	uint8_t iopl:2;  // I/O privilege level (ring)
-	uint8_t nt:1;    // nested task
-	uint8_t res4:1;  // reserved
-	uint8_t rf:1;    // resume flag;
-	uint8_t vm:1;    // virtual 8086 mode
-	uint8_t ac:1;    // alignment check enable
-	uint8_t vif:1;   // virtual interrupt flag
-	uint8_t vip:1;   // virtual interrupt pending;
-	uint8_t id:1;    // have cpuid instruction
-	uint16_t res5:10; // reserved
-	uint32_t res6;    // nothing in top half of rflags yet
-    } __attribute__((packed));
-} __attribute__((packed)) rflags_t;
 
 static int  context_lock;
 static monitoring_context_t context[MAX_CONTEXTS];
-
-static uint32_t get_mxcsr()
-{
-  uint32_t val=0;
-  __asm__ __volatile__ ("stmxcsr %0" : "=m"(val) : : "memory" );
-  return val;
-}
-
-static void set_mxcsr(uint32_t val)
-{
-  __asm__ __volatile__ ("ldmxcsr %0" : : "m"(val) : "memory" );
-}
-
 
 static void init_monitoring_contexts()
 {
@@ -339,27 +246,27 @@ static void free_monitoring_context(int tid)
 //
 static void seed_rand(sampler_state_t *s, uint64_t seed)
 {
-    s->rand.xi = seed;
+  s->rand.xi = seed;
 }
 
 // linear congruent, full 64 bit space
 static inline uint64_t _pump_rand(uint64_t xi, uint64_t a, uint64_t c)
 {
-    uint64_t xi_new = (a*xi + c);
-
-    return xi_new;
+  uint64_t xi_new = (a*xi + c);
+  
+  return xi_new;
 }    
 
 static inline uint64_t pump_rand(sampler_state_t *s)
 {
-    s->rand.xi = _pump_rand(s->rand.xi, 0x5deece66dULL, 0xbULL);
-    
-    return s->rand.xi;
+  s->rand.xi = _pump_rand(s->rand.xi, 0x5deece66dULL, 0xbULL);
+  
+  return s->rand.xi;
 }
 
 static inline uint64_t get_rand(sampler_state_t *s)
 {
-    return pump_rand(s);
+  return pump_rand(s);
 }
 
 
@@ -370,36 +277,38 @@ static inline uint64_t get_rand(sampler_state_t *s)
 // we also need to be sure that we don't cause an exception ourselves
 static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 {
-    uint32_t oldmxcsr = get_mxcsr();
-    uint64_t ret = 0;
-    
-    set_mxcsr(MXCSR_OURS);
-    // now we are safe to do FP that might itself change flags
-    
-    uint64_t r = get_rand(s);
-    double u;
-    r = r & -2ULL; // make sure that we are not at max
+  arch_fp_csr_t oldfpcsr; 
+  uint64_t ret = 0;
 
-    
-    u = ((double) r) / ((double) (-1ULL));
+  arch_config_machine_fp_csr_for_local(&oldfpcsr);
 
-    // u = [0,1)
+  // now we are safe to do FP that might itself change flags
+  
+  uint64_t r = get_rand(s);
+  double u;
+  r = r & -2ULL; // make sure that we are not at max
+  
+  
+  u = ((double) r) / ((double) (-1ULL));
+  
+  // u = [0,1)
+  
+  u = -log(1.0 - u) * ((double)mean_us);
+  
+  // now shape u back into a uint64_t
+  
+  if (u > ((double)(-1ULL))) {
+    ret = -1ULL;
+  } else {
+    ret = (uint64_t)u;
+  }
 
-    u = -log(1.0 - u) * ((double)mean_us);
-
-    // now shape u back into a uint64_t
-
-    if (u > ((double)(-1ULL))) {
-        ret = -1ULL;
-    } else {
-	ret = (uint64_t)u;
-    }
-
-    set_mxcsr(oldmxcsr);
-
-    // no more FP after this
-
-    return ret;
+  // restore state
+  arch_set_machine_fp_csr(&oldfpcsr);
+  
+  // no more FP after this
+  
+  return ret;
 }
 
 
@@ -407,7 +316,6 @@ static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 static void stringify_current_fe_exceptions(char *buf)
 {
   int have=0;
-  uint32_t mxcsr = get_mxcsr();
   buf[0]=0;
 
 #define FE_HANDLE(x) if (orig_fetestexcept(x)) { if (!have) { strcat(buf,#x); have=1; } else {strcat(buf," " #x ); } }
@@ -416,7 +324,7 @@ static void stringify_current_fe_exceptions(char *buf)
   FE_HANDLE(FE_INVALID);
   FE_HANDLE(FE_OVERFLOW);
   FE_HANDLE(FE_UNDERFLOW);
-  if (mxcsr & 0x2) { // denorm
+  if (arch_have_special_fp_csr_exception(FE_DENORM)) {
     if (have) {
       strcat(buf," ");
     }
@@ -429,20 +337,18 @@ static void stringify_current_fe_exceptions(char *buf)
   }
 }
 
-/*
-static void show_current_fe_exceptions()
+static __attribute__((unused))  void show_current_fe_exceptions()
 {
   char buf[80];
   stringify_current_fe_exceptions(buf);
   INFO("%s\n", buf);
 }
-*/
 
 static int writeall(int fd, void *buf, int len)
 {
   int n;
   int left = len;
-
+  
   do {
     n = write(fd,buf,left);
     if (n<0) {
@@ -458,96 +364,11 @@ static int writeall(int fd, void *buf, int len)
 
 static __attribute__((constructor)) void fpspy_init(void);
 
-#if DEBUG_OUTPUT
-
-__attribute__((unused)) static void dump_rflags(char *pre, ucontext_t *uc)
-{
-    char buf[256];
-    
-    rflags_t *r = (rflags_t *)&(uc->uc_mcontext.gregs[REG_EFL]);
-
-    sprintf(buf, "rflags = %016lx", r->val);
-    
-#define EF(x,y) if (r->x) { strcat(buf, " " #y); }
-
-    EF(zf,zero);
-    EF(sf,neg);
-    EF(cf,carry);
-    EF(of,over);
-    EF(pf,parity);
-    EF(af,adjust);
-    EF(tf,TRAP);
-    EF(intf,interrupt);
-    EF(ac,alignment)
-    EF(df,down);
-
-    DEBUG("%s: %s\n",pre,buf);
-}
-
-static void dump_mxcsr(char *pre, ucontext_t *uc)
-{
-    char buf[256];
-
-    mxcsr_t *m = (mxcsr_t *)&uc->uc_mcontext.fpregs->mxcsr;
-
-    sprintf(buf,"mxcsr = %08x flags:", m->val);
-
-#define MF(x,y) if (m->x) { strcat(buf, " " #y); }
-
-    MF(ie,NAN);
-    MF(de,DENORM);
-    MF(ze,ZERO);
-    MF(oe,OVER);
-    MF(ue,UNDER);
-    MF(pe,PRECISION);
-    
-    strcat(buf," masking:");
-
-    MF(im,nan);
-    MF(dm,denorm);
-    MF(zm,zero);
-    MF(om,over);
-    MF(um,under);
-    MF(pm,precision);
-
-    DEBUG("%s: %s rounding: %s %s %s\n",pre,buf,
-	  m->rounding == 0 ? "nearest" :
-	  m->rounding == 1 ? "negative" :
-	  m->rounding == 2 ? "positive" : "zero",
-	  m->daz ? "DAZ" : "",
-	  m->fz ? "FTZ" : "");
-}
-
-#endif
-
-static inline void set_trap_flag_context(ucontext_t *uc, int val)
-{
-  if (val) {
-    uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL; 
-  } else {
-    uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL; 
-  }
-}
-
-
-static inline void clear_fp_exceptions_context(ucontext_t *uc)
-{
-  uc->uc_mcontext.fpregs->mxcsr &= ~MXCSR_FLAG_MASK; 
-}
-
-static inline void set_mask_fp_exceptions_context(ucontext_t *uc, int mask)
-{
-  if (mask) {
-    uc->uc_mcontext.fpregs->mxcsr |= MXCSR_MASK_MASK;
-  } else {
-    uc->uc_mcontext.fpregs->mxcsr &= ~MXCSR_MASK_MASK;
-  }
-}
 
 static void abort_operation(char *reason)
 {
   if (!inited) {
-    DEBUG("Initializing before abortingi\n");
+    DEBUG("Initializing before aborting\n");
     fpspy_init();
     DEBUG("Done with fpspy_init()\n");
   }
@@ -571,7 +392,7 @@ static void abort_operation(char *reason)
 	struct individual_trace_record r;
 	memset(&r,0xff,sizeof(r));
 
-	r.time = rdtsc() - mc->start_time;
+	r.time = arch_cycle_count() - mc->start_time;
 	
 	if (writeall(mc->fd,&r,sizeof(r))) {
 	  ERROR("Failed to write abort record\n");
@@ -928,8 +749,8 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
 {
     sampler_state_t *s = &mc->sampler;
 
-    //dump_rflags("update before",uc);
-    //dump_mxcsr("update before",uc);
+    //arch_dump_gp_csr(stderr,"update before",uc);
+    //arch_dump_fp_csr(stderr,"update before",uc);
 
     // we are guaranteed to be in AWAIT_FPE state at this
     // point.
@@ -941,14 +762,14 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
 
     if (s->state==ON) { 
 	DEBUG("Switching from on to off\n");
-	clear_fp_exceptions_context(uc); // Clear fpe 
-	set_mask_fp_exceptions_context(uc,1); // Mask fpe
-	set_trap_flag_context(uc,0); // disable traps
+	arch_clear_fp_exceptions(uc);        // Clear fpe 
+	arch_mask_fp_traps(uc);              // Mask fpe
+	arch_reset_trap(uc,&mc->trap_state); // disable traps
     } else {
 	DEBUG("Switching from off to on\n");
-	clear_fp_exceptions_context(uc); // Clear fpe
-	set_mask_fp_exceptions_context(uc,0); //Unmask fpe
-	set_trap_flag_context(uc,0); // disable traps
+	arch_clear_fp_exceptions(uc);        // Clear fpe
+	arch_unmask_fp_traps(uc);            //Unmask fpe
+	arch_reset_trap(uc,&mc->trap_state); // disable traps
     }
 
     // schedule next wakeup
@@ -990,32 +811,12 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
 	ERROR("Failed to set timer?!\n");
     }
 
-    //dump_rflags("update after",uc);
-    //dump_mxcsr("update after",uc);
+    //arch_dump_gp_csr(stderr,"update after",uc);
+    //arch_dump_fp_csr(stderr,"update after",uc);
     
     DEBUG("Timer reinitialized for %lu us state %s\n",n,s->state==ON ? "ON" : "off");
 }
 
-#define MXCSR_ROUND_DAZ_FTZ_MASK (~(0xe040UL))
-
-static uint32_t get_mxcsr_round_daz_ftz(ucontext_t *uc)
-{
-  uint32_t mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
-  uint32_t mxcsr_round = mxcsr & MXCSR_ROUND_DAZ_FTZ_MASK;
-  DEBUG("mxcsr (0x%08x) round faz dtz at 0x%08x\n", mxcsr, mxcsr_round);
-  dump_mxcsr("get_mxcsr_round_daz_ftz: ", uc);
-  return mxcsr_round;
-}
-
-static void set_mxcsr_round_daz_ftz(ucontext_t *uc, uint32_t mask)
-{
-  if (control_mxcsr_round_daz_ftz) { 
-    uc->uc_mcontext.fpregs->mxcsr &= MXCSR_ROUND_DAZ_FTZ_MASK;
-    uc->uc_mcontext.fpregs->mxcsr |= mask;
-    DEBUG("mxcsr masked to 0x%08x after round daz ftz update (0x%08x)\n",uc->uc_mcontext.fpregs->mxcsr, mask);
-    dump_mxcsr("set_mxcsr_round_daz_ftz: ", uc);
-  }
-}
     
 
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
@@ -1028,10 +829,13 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 
 
   if (!mc || mc->state==ABORT) { 
-    clear_fp_exceptions_context(uc);     // exceptions cleared
-    set_mask_fp_exceptions_context(uc,1);// exceptions masked
-    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,0);         // traps disabled
+    arch_clear_fp_exceptions(uc);     // exceptions cleared
+    arch_mask_fp_traps(uc);           // exceptions masked
+    if (control_round_config) {
+      arch_set_round_config(uc,orig_round_config);
+    }
+    // PAD - BAD use of trap_state here
+    arch_reset_trap(uc,&mc->trap_state);  // trap off
     if (!mc) {
       // this may end badly
       abort_operation("Cannot find monitoring context during sigtrap_handler exec");
@@ -1042,11 +846,13 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   }
 
   if (mc && mc->state==INIT) {
-    orig_mxcsr_round_daz_ftz_mask = get_mxcsr_round_daz_ftz(uc);
-    clear_fp_exceptions_context(uc);     // exceptions cleared
-    set_mask_fp_exceptions_context(uc,0);// exceptions unmasked
-    set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,0);         // traps disabled
+    orig_round_config = arch_get_round_config(uc);
+    arch_clear_fp_exceptions(uc);
+    arch_unmask_fp_traps(uc);    
+    if (control_round_config) {
+      arch_set_round_config(uc,our_round_config);
+    }
+    arch_reset_trap(uc,&mc->trap_state);      // trap disabled
     mc->state = AWAIT_FPE;
     DEBUG("MXCSR state initialized\n");
     return;
@@ -1054,26 +860,32 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   
   if (mc->state == AWAIT_TRAP) { 
     mc->count++;
-    clear_fp_exceptions_context(uc);      // exceptions cleared
+    arch_clear_fp_exceptions(uc);         
     if (maxcount!=-1 && mc->count >= maxcount) { 
       // disable further operation since we've recorded enough
-      set_mask_fp_exceptions_context(uc,1); // exceptions masked
-      set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
+      arch_mask_fp_traps(uc);             
+      if (control_round_config) {
+	arch_set_round_config(uc,orig_round_config);
+      }
     } else {
-      set_mask_fp_exceptions_context(uc,0); // exceptions unmasked
-      set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
+      arch_unmask_fp_traps(uc);
+      if (control_round_config) {
+	arch_set_round_config(uc,our_round_config);
+      }
     }
-    set_trap_flag_context(uc,0);          // traps disabled
+    arch_reset_trap(uc,&mc->trap_state);
     mc->state = AWAIT_FPE;
     if (mc->sampler.delayed_processing) {
 	DEBUG("Delayed sampler handling\n");
 	update_sampler(mc,uc);
     }
   } else {
-    clear_fp_exceptions_context(uc);     // exceptions cleared
-    set_mask_fp_exceptions_context(uc,1);// exceptions masked
-    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,0);         // traps disabled
+    arch_clear_fp_exceptions(uc);
+    arch_mask_fp_traps(uc);
+    if (control_round_config) {
+      arch_set_round_config(uc,orig_round_config);
+    }
+    arch_reset_trap(uc,&mc->trap_state);
     mc->aborting_in_trap = 1;
     abort_operation("Surprise state during sigtrap_handler exec");
   }
@@ -1095,10 +907,12 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     
 
   if (!mc) {
-    clear_fp_exceptions_context(uc);     // exceptions cleared
-    set_mask_fp_exceptions_context(uc,1);// exceptions masked
-    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,0);         // traps disabled
+    arch_clear_fp_exceptions(uc);
+    arch_mask_fp_traps(uc);
+    if (control_round_config) {
+      arch_set_round_config(uc,orig_round_config);
+    }
+    arch_reset_trap(uc,&mc->trap_state);
     abort_operation("Cannot find monitoring context during sigfpe_handler exec");
     return;
   }
@@ -1106,11 +920,11 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   if (!(mc->count % sample_period)) { 
     individual_trace_record_t r;  
 
-    r.time = rdtsc() - mc->start_time;
-    r.rip = (void*) uc->uc_mcontext.gregs[REG_RIP];
-    r.rsp = (void*) uc->uc_mcontext.gregs[REG_RSP];
+    r.time = arch_cycle_count() - mc->start_time;
+    r.rip = (void*) arch_get_ip(uc);
+    r.rsp = (void*) arch_get_sp(uc);
     r.code =  si->si_code;
-    r.mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
+    r.mxcsr =  arch_get_fp_csr(uc);
     memcpy(r.instruction,r.rip,15);
     r.pad = 0;
     
@@ -1137,17 +951,21 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   }
 #endif
       
-  if (mc->state == AWAIT_FPE) { 
-    clear_fp_exceptions_context(uc);      // exceptions cleared
-    set_mask_fp_exceptions_context(uc,1); // exceptions masked
-    set_mxcsr_round_daz_ftz(uc,our_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,1);          // traps enabled
+  if (mc->state == AWAIT_FPE) {
+    arch_clear_fp_exceptions(uc);
+    arch_mask_fp_traps(uc);
+    if (control_round_config) {
+      arch_set_round_config(uc,our_round_config);
+    }
+    arch_set_trap(uc,&mc->trap_state);
     mc->state = AWAIT_TRAP;
   } else {
-    clear_fp_exceptions_context(uc);     // exceptions cleared
-    set_mask_fp_exceptions_context(uc,1);// exceptions masked
-    set_mxcsr_round_daz_ftz(uc,orig_mxcsr_round_daz_ftz_mask);
-    set_trap_flag_context(uc,0);         // traps disabled
+    arch_clear_fp_exceptions(uc);
+    arch_mask_fp_traps(uc);
+    if (control_round_config) {
+      arch_set_round_config(uc,orig_round_config);
+    }
+    arch_reset_trap(uc,0);
     abort_operation("Surprise state during sigfpe_handler exec");
   }
   DEBUG("FPE done\n");
@@ -1176,79 +994,68 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
 
 static void sigalrm_handler(int sig, siginfo_t *si,  void *priv)
 {
-    monitoring_context_t *mc = find_monitoring_context(gettid());
-    ucontext_t *uc = (ucontext_t *)priv;
- 
-    DEBUG("Timeout for %d\n", gettid());
-
-    //dump_rflags("before alarm",uc);
-    //dump_mxcsr("before alarm",uc);
-
-    
-    if (!mc) {
-	ERROR("Could not find monitoring context for %d\n",gettid());
-	return;
-    }
-
-
-    if (mc->state != AWAIT_FPE) {
-	// we are in the middle of handling an instruction, so we will
-	// defer the transition until after this is done
-	DEBUG("Delaying sampler processing because we are in the middle of an instruction\n");
-	mc->sampler.delayed_processing = 1;
-	return ;
-    } else {
-	update_sampler(mc,uc);
-    }
-
-    //dump_rflags("after alarm",uc);
-    //dump_mxcsr("after alarm",uc);
-
+  monitoring_context_t *mc = find_monitoring_context(gettid());
+  ucontext_t *uc = (ucontext_t *)priv;
+  
+  DEBUG("Timeout for %d\n", gettid());
+  
+  if (!mc) {
+    ERROR("Could not find monitoring context for %d\n",gettid());
+    return;
+  }
+  if (mc->state != AWAIT_FPE) {
+    // we are in the middle of handling an instruction, so we will
+    // defer the transition until after this is done
+    DEBUG("Delaying sampler processing because we are in the middle of an instruction\n");
+    mc->sampler.delayed_processing = 1;
+    return ;
+  } else {
+    update_sampler(mc,uc);
+  }
 }
 
-    
+
 
 void init_random(sampler_state_t *s)
 {
-    // randomization
-    if (random_seed!=-1) {
-	seed_rand(s,random_seed);
-    } else {
-	seed_rand(s,rdtsc());
-    }
+  // randomization
+  if (random_seed!=-1) {
+    seed_rand(s,random_seed);
+  } else {
+    seed_rand(s,arch_cycle_count());
+  }
 }
-
 
 
 void init_sampler(sampler_state_t *s)
 {
-    DEBUG("Init sampler (%p)\n",s);
-    
-    init_random(s);
-
-    s->on_mean_us = on_mean_us;
-    s->off_mean_us = off_mean_us;
-
-    s->state = ON;
-
-    if (!timers) {
-	DEBUG("Sampler without timing\n");
-	return;
-    }
-    
-    uint64_t n = next_exp(s,s->on_mean_us);
-
-    s->it.it_interval.tv_sec = 0;
-    s->it.it_interval.tv_usec = 0;
-    s->it.it_value.tv_sec = n / 1000000;
-    s->it.it_value.tv_usec = n % 1000000;
-
-    if (setitimer(timer_type, &(s->it), NULL)) {
-	ERROR("Failed to set timer?!\n");
-    }
-
-    DEBUG("Timer initialized for %lu us\n",n);
-    
+  DEBUG("Init sampler (%p)\n",s);
+  
+  init_random(s);
+  
+  s->on_mean_us = on_mean_us;
+  s->off_mean_us = off_mean_us;
+  
+  s->state = ON;
+  
+  if (!timers) {
+    DEBUG("Sampler without timing\n");
+    return;
+  }
+  
+  uint64_t n = next_exp(s,s->on_mean_us);
+  
+  s->it.it_interval.tv_sec = 0;
+  s->it.it_interval.tv_usec = 0;
+  s->it.it_value.tv_sec = n / 1000000;
+  s->it.it_value.tv_usec = n % 1000000;
+  
+  if (setitimer(timer_type, &(s->it), NULL)) {
+    ERROR("Failed to set timer?!\n");
+  }
+  
+  DEBUG("Timer initialized for %lu us\n",n);
+  
 }
 
 static int bringup_monitoring_context(int tid)
@@ -1268,10 +1075,11 @@ static int bringup_monitoring_context(int tid)
     return -1;
   }
 
-  c->start_time = rdtsc();
+  c->start_time = arch_cycle_count();
   c->state = INIT;
   c->aborting_in_trap = 0;
   c->count = 0;
+  c->trap_state = 0;
 
   init_sampler(&c->sampler);
   
@@ -1306,20 +1114,20 @@ static int bringup()
     ERROR("Cannot setup shims\n");
     return -1;
   }
-
+  
   ORIG_IF_CAN(feclearexcept,exceptmask);
-
+  
   if (mode==INDIVIDUAL) {
     
     init_monitoring_contexts();
-
+    
     if (bringup_monitoring_context(gettid())) { 
       ERROR("Failed to start up monitoring context at startup\n");
       return -1;
     }
-
+    
     struct sigaction sa;
-
+    
     int alarm_sig =
       timer_type==ITIMER_REAL ? SIGALRM : 
       timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
@@ -1334,7 +1142,7 @@ static int bringup()
     if (timers) {sigaddset(&sa.sa_mask, alarm_sig);}
     
     ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
-
+    
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1344,7 +1152,7 @@ static int bringup()
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig); }
     sigaddset(&sa.sa_mask, SIGFPE); 
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
-
+    
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigint_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1353,28 +1161,27 @@ static int bringup()
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig);}
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
-
+    
     if (timers) {
-	// only initialize timing if we need it
-	DEBUG("Setting up timer interrupt handler\n");
-	memset(&sa, 0,sizeof(sa));
-	sa.sa_sigaction = sigalrm_handler;
-	sa.sa_flags |= SA_SIGINFO;
-	sigemptyset(&sa.sa_mask);
-	sigaddset(&sa.sa_mask, SIGINT);
-	ORIG_IF_CAN(sigaction,
-		    alarm_sig,
-		    &sa,&oldsa_alrm);
+      // only initialize timing if we need it
+      DEBUG("Setting up timer interrupt handler\n");
+      memset(&sa, 0,sizeof(sa));
+      sa.sa_sigaction = sigalrm_handler;
+      sa.sa_flags |= SA_SIGINFO;
+      sigemptyset(&sa.sa_mask);
+      sigaddset(&sa.sa_mask, SIGINT);
+      ORIG_IF_CAN(sigaction,
+		  alarm_sig,
+		  &sa,&oldsa_alrm);
     }
-
+    
     ORIG_IF_CAN(feenableexcept,exceptmask);
     
     // now kick ourselves to set the sse bits; we are currently in state INIT
-
+    
     kill(getpid(),SIGTRAP);
   }
   
-
   inited=1;
   DEBUG("Done with setup\n");
   return 0;
@@ -1390,70 +1197,73 @@ static void config_exceptions(char *buf)
   }
   
   exceptmask = 0;
-  mxcsrmask_base = 0;
+  arch_clear_except_mask();
   
   if (strcasestr(buf,"inv")) {
     DEBUG("tracking INVALID\n");
     exceptmask |= FE_INVALID ;
-    mxcsrmask_base |= 0x1;
+    arch_set_except_mask(FE_INVALID);
   }
   if (strcasestr(buf,"den")) {
     DEBUG("tracking DENORM\n");
-    exceptmask |= 0 ; // not provided...  
-    mxcsrmask_base |= 0x2;
+    exceptmask |= 0 ; // not provided in standard interface, catch via arch-specific...
+    arch_set_except_mask(FE_DENORM);
   }
   if (strcasestr(buf,"div")) {
     DEBUG("tracking DIVIDE_BY_ZERO\n");
     exceptmask |= FE_DIVBYZERO ;
-    mxcsrmask_base |= 0x4;
+    arch_set_except_mask(FE_DIVBYZERO);
   }
   if (strcasestr(buf,"over")) {
     DEBUG("tracking OVERFLOW\n");
     exceptmask |= FE_OVERFLOW;
-    mxcsrmask_base |= 0x8;
+    arch_set_except_mask(FE_OVERFLOW);
   }
   if (strcasestr(buf,"under")) {
     DEBUG("tracking UNDERFLOW\n");
     exceptmask |= FE_UNDERFLOW ;
-    mxcsrmask_base |= 0x10;
+    arch_set_except_mask(FE_UNDERFLOW);
   }
   if (strcasestr(buf,"prec")) {
     DEBUG("tracking PRECISION\n");
     exceptmask |= FE_INEXACT ;
-    mxcsrmask_base |= 0x20;
+    arch_set_except_mask(FE_INEXACT);
   }
 
 }
 
 static void config_round_daz_ftz(char *buf)
 {
-  uint32_t r=0;
+  orig_round_config = arch_get_machine_round_config();
+
+  our_round_config = 0;
   
   if (strcasestr(buf,"pos")) {
-    r = 0x4000UL;
+    arch_set_round_mode(&our_round_config,FPSPY_ROUND_POSITIVE);
   } else if (strcasestr(buf,"neg")) {
-    r = 0x2000UL;
+    arch_set_round_mode(&our_round_config,FPSPY_ROUND_NEGATIVE);
   } else if (strcasestr(buf,"zer")) {
-    r = 0x6000UL;
+    arch_set_round_mode(&our_round_config,FPSPY_ROUND_ZERO);
   } else if (strcasestr(buf,"nea")) {
-    r = 0x0000UL;
+    arch_set_round_mode(&our_round_config,FPSPY_ROUND_NEAREST);
   } else {
     ERROR("Unknown rounding mode - avoiding rounding control\n");
-    control_mxcsr_round_daz_ftz = 0;
+    control_round_config = 0;
     return;
   }
 
+  int which=0;
   if (strcasestr(buf,"daz")) {
-    r |= 0x0040UL;
+    which+=2;
   }
   if (strcasestr(buf,"ftz")) {
-    r |= 0x8000UL;
+    which+=1;
   }
+  arch_set_dazftz_mode(&our_round_config,which);
 
-  control_mxcsr_round_daz_ftz = 1;
-  our_mxcsr_round_daz_ftz_mask = r;
-  
-  DEBUG("Configuring rounding control to 0x%08x\n", our_mxcsr_round_daz_ftz_mask);
+  control_round_config = 1;
+
+  DEBUG("Configuring rounding control to 0x%08x\n", our_round_config);
 
 }
     

@@ -13,10 +13,10 @@ CC = gcc
 LD = ld
 AR = ar
 
-CFLAGS_FPSPY = -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/arch/$(ARCH)
+CFLAGS_FPSPY = -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/$(ARCH) -D$(ARCH)
 LDFLAGS_FPSPY =  -lm -ldl
 
-CFLAGS_TOOL = -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/arch/$(ARCH)
+CFLAGS_TOOL = -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/$(ARCH)
 LDFLAGS_TOOL =  -lm
 
 CFLAGS_TEST = -O2 -Wall -fno-strict-aliasing -pthread
@@ -31,8 +31,8 @@ all: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/trace_print bin/$(A
 
 
 
-bin/$(ARCH)/fpspy.so: src/fpspy.c include/trace_record.h
-	$(CC) $(CFLAGS_FPSPY) src/fpspy.c $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
+bin/$(ARCH)/fpspy.so: src/fpspy.c include/*.h src/$(ARCH)/*.c include/$(ARCH)/*.h
+	$(CC) $(CFLAGS_FPSPY) src/fpspy.c src/$(ARCH)/*.c $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
 
 bin/$(ARCH)/test_fpspy: test/test_fpspy.c
 	$(CC) $(CFLAGS_TEST) test/test_fpspy.c $(LDFLAGS_TEST) -o bin/$(ARCH)/test_fpspy
