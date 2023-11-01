@@ -117,9 +117,16 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc);
 uint64_t arch_get_gp_csr(const ucontext_t *uc);
 uint64_t arch_get_ip(const ucontext_t *uc);
 uint64_t arch_get_sp(const ucontext_t *uc);
-  
 
 
+// Implementation is initialized at start of process.  It can
+// veto by returning non-zero.   Implementation is also
+// initialized/deinitialized on each thread.
+int  arch_process_init(void);
+void arch_process_deinit(void);
+
+int  arch_thread_init(ucontext_t *uc); // uc can be null (for aggregate mode)
+void arch_thread_deinit(void);
 
 #endif
 

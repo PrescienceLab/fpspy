@@ -108,6 +108,13 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc);
 uint64_t arch_get_gp_csr(const ucontext_t *uc);
 uint64_t arch_get_ip(const ucontext_t *uc);
 uint64_t arch_get_sp(const ucontext_t *uc);
-  
+
+
+int  arch_process_init(void);
+void arch_process_deinit(void);
+
+int  arch_thread_init(ucontext_t *uc);
+void arch_thread_deinit(void);
+
 
 #endif

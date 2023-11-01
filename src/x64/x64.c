@@ -301,3 +301,26 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
 {
   return uc->uc_mcontext.fpregs->mxcsr;
 }
+
+
+int  arch_process_init(void)
+{
+  DEBUG("x64 process init\n");
+  return 0;
+}
+
+void arch_process_deinit(void)
+{
+  DEBUG("x64 process deinit\n");
+}
+
+int  arch_thread_init(ucontext_t *uc)
+{
+  DEBUG("x64 thread init\n");
+  return 0;
+}
+
+void arch_thread_deinit(void)
+{
+  DEBUG("x64 thread deinit\n");
+}

@@ -506,6 +506,10 @@ int fork()
   if (rc==0) {
     // child process - we need to bring up FPSpy on it
 
+    // we inherit process state from parent, so what this looks like
+    // now is like a new thread
+    DEBUG("skipping architecture process init on fork\n");
+    
     // clear exceptions - we will not inherit the current ones from the parent
     ORIG_IF_CAN(feclearexcept,exceptmask);
 
@@ -521,11 +525,19 @@ int fork()
 	// we should have inherited all the sighandlers, etc, from our parent
 	
 	// now kick ourselves to set the sse bits; we are currently in state INIT
+	// this will also do the architectural init
 	kill(gettid(),SIGTRAP);
 	// we should now be in the right state
       }
       
+    } else {
+      // we need to bring up the architecture for this thread
+      if (arch_thread_init(0)) {
+	ERROR("Failed to bring up architectural state for thread\n");
+	// we are doomed from this point
+      }
     }
+    
     DEBUG("Done with setup on fork\n");
     return rc;
 
@@ -562,7 +574,7 @@ static void *trampoline(void *p)
   __sync_fetch_and_or(&c->done,1);
 
   DEBUG("Setting up thread %d\n",gettid());
-  
+
   // clear exceptions just in case
   ORIG_IF_CAN(feclearexcept,exceptmask);
   
@@ -578,8 +590,12 @@ static void *trampoline(void *p)
       // now kick ourselves to set the sse bits; we are currently in state INIT
       kill(gettid(),SIGTRAP);
       // we should now be in the right state
+      // the architecure init is done in the trap handler
     }
     DEBUG("Done with setup on thread creation\n");
+  } else {
+    // we need to do the architecture init here
+    arch_thread_init(0);
   }
  
   DEBUG("leaving trampoline\n");
@@ -990,6 +1006,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   }
   
   if (mc && mc->state==INIT) {
+    if (arch_thread_init(uc)) {
+      // bad news, probably... 
+      abort_operation("failed to setup thread for architecture\n");
+    }
     orig_round_config = arch_get_round_config(uc);
     arch_clear_fp_exceptions(uc);
     arch_unmask_fp_traps(uc);    
@@ -1233,6 +1253,11 @@ static int teardown_monitoring_context(int tid)
  
 static int bringup()
 {
+  if (arch_process_init()) {
+    ERROR("Cannot initialize architecture\n");
+    return -1;
+  }
+  
   if (setup_shims()) { 
     ERROR("Cannot setup shims\n");
     return -1;
@@ -1301,8 +1326,15 @@ static int bringup()
     ORIG_IF_CAN(feenableexcept,exceptmask);
     
     // now kick ourselves to set the sse bits; we are currently in state INIT
-    
+    // this will also do the architecture init for the thread
     kill(getpid(),SIGTRAP);
+    
+  } else {
+    // we need to bring up the architectural state for the thread
+    if (arch_thread_init(0)) {
+      ERROR("Failed to bring up thread architectural state\n");
+      return -1;
+    }
   }
   
   inited=1;
@@ -1529,6 +1561,7 @@ static __attribute__((destructor)) void fpspy_deinit(void)
       }
     }
   }
+  arch_process_deinit();
   inited=0;
   DEBUG("done\n");
 }
