@@ -33,53 +33,92 @@ typedef enum {
 #elif defined(arm64)
 #include "arm64/arm64.h"
 #else
-// generic
-// generic versions - should be included in the architecture include
-union arch_fp_csr {} ;
 
+//
+// This is the "abstract" interface
+//
+
+// Implementation must let us define the set of exceptions that
+// we want to have trap.   "which" is indicated using the regular
+// fenv values (e.g., FE_DIVZERO, FE_INVALID, ..) plus others
+// that might be supported, like FE_DENORM
+//
+// The idea is that these functions will be used at startup time
+// to build an except/trap mask that then will be applied when we
+// invoke arch_(un)mask_fp_traps() (see below)
+#define  FE_DENORM 0x1000
+void arch_clear_trap_mask(void);
+void arch_set_trap_mask(int which);
+void arch_reset_trap_mask(int which);
+
+
+// Implementation needs to define a type for the FP control/status reg
+typedef union arch_fp_csr {} arch_fp_csr_t;
+
+// Implementation must let us get at raw machine state (opaque is fine)
 uint64_t arch_cycle_count(void);
-void     arch_get_fp_csr(union arch_fp_csr *f);
-void     arch_set_fp_csr(const union arch_fp_csr *f);
+void     arch_get_machine_fp_csr(arch_fp_csr_t *f);
+void     arch_set_machine_fp_csr(const arch_fp_csr_t *f);
 
-// snapshot fp csr and config it for FP *within* FPSpy
-// returns old fp csr - later use set to restore
-void     arch_config_fp_csr_for_local(union arch_fp_csr *old);
+// Implementation must let us disable all traps, etc, and set FP defaults
+// so that we can perform FP ourselves within FPSpy when absolutely needed
+void     arch_config_fp_csr_for_local(arch_fp_csr_t *old);
 
-void     arch_dump_fp_csr(FILE *out, const char *prefix, const ucontext_t *uc);
-void     arch_dump_gp_csr(FILE *out, const char *prefix, const ucontext_t *uc);
+// Implementation should be able to tell us if any special exception
+// (other than the fenv ones) has been noted.  For example FE_DENORM
+int      arch_have_special_fp_csr_exception(int which);
 
-// trap on the next instruction after the one in the ucontext
-// state points to a location that information can be stored in
-// state can be used to stash an instruction in a patch model,
-// for example
+// Implementation must let us dump FP and GP control/status regs
+// and should dump them using the DEBUG() macro
+void     arch_dump_gp_csr(const char *pre, const ucontext_t *uc);
+void     arch_dump_fp_csr(const char *pre, const ucontext_t *uc);
+
+// Implementation must let us trap on the *next* instruction after the
+// current one in the ucontext.
+// state points to a location where the implementation can
+// stash state on a "set_trap" and then see it again on "reset_trap".
+// If state==NULL, then the implementation should do the best it can
+// If this happens, it is because of a surprise abort in FPSpy in which
+// we cannot find the monitoring context of the thread.
 void     arch_set_trap(ucontext_t *uc, uint64_t *state);
-// disable the trap for the current instruction
-// previous state is passed back in
+// disable the trap for the *current* instruction
 void     arch_reset_trap(ucontext_t *uc, uint64_t *state);
 
-void arch_set_trap(ucontext_t *uc, uint64_t *state)
-{
-  uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL;
-}
-
-void arch_reset_trap(ucontext_t *uc, uint64_t *state)
-{
-  uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL; 
-}
-
-
+// Implementation must allow us to clear all FP exceptions in the ucontext
 void arch_clear_fp_exceptions(ucontext_t *uc);
+
+// Implementation must allow us to mask and unmask FP traps in the ucontext
+// The traps to use are set previously (see "trap_mask" above)
 void arch_mask_fp_traps(ucontext_t *uc);
 void arch_unmask_fp_traps(ucontext_t *uc);
 
+// Implementation must allow us to get the FP rounding configuration from the
+// hardware. This is opaque
+fpspy_round_config_t arch_get_machine_round_config(void);
+
+// Implementation must allow us to get/set the FP rounding configuration
+// of the ucontext.  This is opaque
 fpspy_round_config_t arch_get_round_config(ucontext_t *uc);
-void                 arch_set_round_config(ucontext_t *uc, fpspy_round_config_t newconfig);
+void                 arch_set_round_config(ucontext_t *uc, fpspy_round_config_t config);
 
+// Implementation must allow us to interogate the opaque rounding config
+// to get at the IEEE rounding mode.
+fpspy_round_mode_t   arch_get_round_mode(fpspy_round_config_t config);
+void                 arch_set_round_mode(fpspy_round_config_t  *config, fpspy_round_mode_t mode);
 
-fpspy_round_mode_t     arch_get_round_mode(fpspy_round_config_t config);
-void                   arch_set_round_mode(fpspy_round_config_t  *config, fpspy_round_mode_t mode);
-fpspy_dazftz_mode_t    arch_get_daz_ftz_mode(fpspy_round_config_t config);
-void                   arch_set_dazftz_mode(fpspy_round_config_t *config, fpspy_dazftz_mode_t mode);
+// Implementation must allow us to interogate the opaque rounding config
+// to get at the DAZ and FTZ features of the hardware, if they are supported
+fpspy_dazftz_mode_t  arch_get_dazftz_mode(fpspy_round_config_t *config);
+void                 arch_set_dazftz_mode(fpspy_round_config_t *config, fpspy_dazftz_mode_t mode);
+
+// Implementation must allow us to get at the raw FP and FP CSRs of the ucontext
+// As well as the instruction pointer and stack pointer
+uint64_t arch_get_fp_csr(const ucontext_t *uc);
+uint64_t arch_get_gp_csr(const ucontext_t *uc);
+uint64_t arch_get_ip(const ucontext_t *uc);
+uint64_t arch_get_sp(const ucontext_t *uc);
+  
+
 
 
 #endif

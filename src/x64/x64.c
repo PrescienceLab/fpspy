@@ -19,12 +19,12 @@ static int mxcsrmask_base = 0x3f; // which sse exceptions to handle, default all
 #define MXCSR_FLAG_MASK (mxcsrmask_base<<0)
 #define MXCSR_MASK_MASK (mxcsrmask_base<<7)
 
-void arch_clear_except_mask(void)
+void arch_clear_trap_mask(void)
 {
   mxcsrmask_base = 0;
 }
 
-void arch_set_except_mask(int which)
+void arch_set_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
@@ -48,7 +48,7 @@ void arch_set_except_mask(int which)
   }
 }
 
-void arch_reset_except_mask(int which)
+void arch_reset_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
@@ -102,7 +102,7 @@ void arch_set_machine_fp_csr(const arch_fp_csr_t *f)
 }
 
 
-void arch_config_fp_csr_for_local(arch_fp_csr_t *old)
+void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
 {
   arch_get_machine_fp_csr(old);
   set_mxcsr(MXCSR_OURS);
@@ -178,13 +178,13 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc)
 void arch_set_trap(ucontext_t *uc, uint64_t *state)
 {
   uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL;
-  *state = 2;
+  if (state) {  *state = 2; }
 }
 
 void arch_reset_trap(ucontext_t *uc, uint64_t *state)
 {
   uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL;
-  *state = 1;
+  if (state) { *state = 1; }
 }
 
 
@@ -218,7 +218,7 @@ fpspy_round_config_t arch_get_round_config(ucontext_t *uc)
   uint32_t mxcsr =  uc->uc_mcontext.fpregs->mxcsr;
   uint32_t mxcsr_round = mxcsr & MXCSR_ROUND_DAZ_FTZ_MASK;
   DEBUG("mxcsr (0x%08x) round faz dtz at 0x%08x\n", mxcsr, mxcsr_round);
-  arch_dump_fp_csr("get_mxcsr_round_daz_ftz: ", uc);
+  arch_dump_fp_csr("arch_get_round_config", uc);
   return mxcsr_round;
 }
 
@@ -227,7 +227,7 @@ void arch_set_round_config(ucontext_t *uc, fpspy_round_config_t config)
   uc->uc_mcontext.fpregs->mxcsr &= MXCSR_ROUND_DAZ_FTZ_MASK;
   uc->uc_mcontext.fpregs->mxcsr |= config;
   DEBUG("mxcsr masked to 0x%08x after round daz ftz update (0x%08x)\n",uc->uc_mcontext.fpregs->mxcsr, config);
-  arch_dump_fp_csr("set_mxcsr_round_daz_ftz: ", uc);
+  arch_dump_fp_csr("arch_set_round_config", uc);
 }
 
 fpspy_round_mode_t     arch_get_round_mode(fpspy_round_config_t config)
@@ -241,7 +241,7 @@ void                   arch_set_round_mode(fpspy_round_config_t  *config, fpspy_
   *config |= (mode & 0x3) << 13;
 }
 
-fpspy_dazftz_mode_t    arch_get_daz_ftz_mode(fpspy_round_config_t *config)
+fpspy_dazftz_mode_t    arch_get_dazftz_mode(fpspy_round_config_t *config)
 {
   switch (*config & 0x8040) {
   case 0x8040:
@@ -276,6 +276,7 @@ void arch_set_dazftz_mode(fpspy_round_config_t *config, fpspy_dazftz_mode_t mode
     break;
   case FPSPY_ROUND_NO_DAZ_NO_FTZ:
   default:
+    // leave at 0x0000
     break;
   }
 }

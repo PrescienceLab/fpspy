@@ -65,9 +65,11 @@ static inline uint64_t __attribute__((always_inline)) arch_cycle_count(void)
   return lo | ((uint64_t)(hi) << 32);
 }
 
-void arch_clear_except_mask(void);
-void arch_set_except_mask(int which);
-void arch_reset_except_mask(int which);
+// the DENORM trap is also available on x86
+#define  FE_DENORM 0x1000
+void arch_clear_trap_mask(void);
+void arch_set_trap_mask(int which);
+void arch_reset_trap_mask(int which);
 
 
 uint64_t arch_cycle_count(void);
@@ -76,8 +78,7 @@ void     arch_set_machine_fp_csr(const arch_fp_csr_t *f);
 
 void     arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old);
 
-// currently only the denorm exception is special
-#define  FE_DENORM 0x1000
+// detects only FE_DENORM (within the HW state)
 int      arch_have_special_fp_csr_exception(int which);
 
 void     arch_dump_gp_csr(const char *pre, const ucontext_t *uc);
@@ -99,10 +100,12 @@ void                 arch_set_round_config(ucontext_t *uc, fpspy_round_config_t 
 fpspy_round_mode_t   arch_get_round_mode(fpspy_round_config_t config);
 void                 arch_set_round_mode(fpspy_round_config_t  *config, fpspy_round_mode_t mode);
 
-fpspy_dazftz_mode_t  arch_get_daz_ftz_mode(fpspy_round_config_t *config);
+fpspy_dazftz_mode_t  arch_get_dazftz_mode(fpspy_round_config_t *config);
 void                 arch_set_dazftz_mode(fpspy_round_config_t *config, fpspy_dazftz_mode_t mode);
 
+
 uint64_t arch_get_fp_csr(const ucontext_t *uc);
+uint64_t arch_get_gp_csr(const ucontext_t *uc);
 uint64_t arch_get_ip(const ucontext_t *uc);
 uint64_t arch_get_sp(const ucontext_t *uc);
   
