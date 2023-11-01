@@ -11,12 +11,12 @@ typedef union  {
 	uint8_t ue:1;  // detected underflow (zero)
 	uint8_t pe:1;  // detected precision (rounding)
 	uint8_t daz:1; // denormals become zeros
-	uint8_t im:1;  // mask nan exceptions
-	uint8_t dm:1;  // mask denorm exceptions
-	uint8_t zm:1;  // mask zero exceptions
-	uint8_t om:1;  // mask overflow exceptions
-	uint8_t um:1;  // mask underflow exceptions
-	uint8_t pm:1;  // mask precision exceptions
+	uint8_t im:1;  // mask nan traps
+	uint8_t dm:1;  // mask denorm traps
+	uint8_t zm:1;  // mask zero traps
+	uint8_t om:1;  // mask overflow traps
+	uint8_t um:1;  // mask underflow traps
+	uint8_t pm:1;  // mask precision traps
 	uint8_t rounding:2; // rounding (toward 00=>nearest,01=>negative,10=>positive,11=>zero)
 	uint8_t fz:1;  // flush to zero (denormals are zeros)
 	uint16_t rest;  
