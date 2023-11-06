@@ -39,6 +39,8 @@ typedef union  {
 
 typedef fpscr_t arch_fp_csr_t;
 
+#pragma GCC diagnostic ignored "-Wpacked-bitfield-compat"
+
 // this is the "pstate", which is provided by Linux, but
 // is actually an amalgam of fields from different registers internally
 typedef union {
@@ -61,6 +63,8 @@ typedef union {
     uint8_t n:1;   // negative cc
   } __attribute__((packed));
 } __attribute__((packed)) pstate_t;
+
+#pragma GCC diagnostic pop
 
 typedef pstate_t arch_gp_csr_t;
 

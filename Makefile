@@ -6,8 +6,8 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-ARCH=x64
-#ARCH=arm64
+#ARCH=x64
+ARCH=arm64
 
 CC = gcc
 LD = ld

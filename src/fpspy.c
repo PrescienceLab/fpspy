@@ -52,7 +52,9 @@
 
 #define _GNU_SOURCE
 #include <sys/ptrace.h>
+#ifdef x64
 #include <sys/reg.h>
+#endif
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/user.h>
