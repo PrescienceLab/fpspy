@@ -111,7 +111,7 @@ void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
 int      arch_have_special_fp_csr_exception(int which)
 {
   if (which==FE_DENORM) {
-    return get_mxcsr() & 0x2;
+    return !!(get_mxcsr() & 0x2);
   } else {
     return 0;
   }
@@ -204,7 +204,7 @@ void arch_unmask_fp_traps(ucontext_t *uc)
 }  
 
 
-#define MXCSR_ROUND_DAZ_FTZ_MASK (~(0xe040UL))
+#define MXCSR_ROUND_DAZ_FTZ_MASK 0xe040UL
 
 fpspy_round_config_t arch_get_machine_round_config(void)
 {
@@ -224,7 +224,7 @@ fpspy_round_config_t arch_get_round_config(ucontext_t *uc)
 
 void arch_set_round_config(ucontext_t *uc, fpspy_round_config_t config)
 {
-  uc->uc_mcontext.fpregs->mxcsr &= MXCSR_ROUND_DAZ_FTZ_MASK;
+  uc->uc_mcontext.fpregs->mxcsr &= ~MXCSR_ROUND_DAZ_FTZ_MASK;
   uc->uc_mcontext.fpregs->mxcsr |= config;
   DEBUG("mxcsr masked to 0x%08x after round daz ftz update (0x%08x)\n",uc->uc_mcontext.fpregs->mxcsr, config);
   arch_dump_fp_csr("arch_set_round_config", uc);
