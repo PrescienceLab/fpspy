@@ -205,6 +205,8 @@ static int get_fpsr(const ucontext_t *uc, fpsr_t *f)
 
   f->val = c->fpsr;
 
+  DEBUG("get_fpsr returns %016lx\n",f->val);
+
   return 0;
 }
 
@@ -219,6 +221,8 @@ static int set_fpsr(ucontext_t *uc, const fpsr_t *f)
 
   c->fpsr = f->val;
 
+  DEBUG("set_fpsr(%016lx) succeeds (written value is %08lx)\n",f->val,c->fpsr);
+
   return 0;
 }
 
@@ -232,7 +236,9 @@ static int get_fpcr(const ucontext_t *uc, fpcr_t *f)
   }
 
   f->val = c->fpcr;
-
+ 
+  DEBUG("get_fpcr returns %016lx\n",f->val);
+ 
   return 0;
 }
 
@@ -246,6 +252,8 @@ static int set_fpcr(ucontext_t *uc, const fpcr_t *f)
   }
 
   c->fpcr = f->val;
+
+  DEBUG("set_fpcr(%016lx) succeeds (written value is %08lx)\n",f->val,c->fpcr);
 
   return 0;
 }
@@ -342,7 +350,7 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state)
     uint32_t instr;
     DECODE(state,instr,flag);
 
-    if (flag!=2) {
+    if (flag!=2 && flag!=0) {  // flag 0 = 1st trap to kick off machine
       ERROR("Surprise state flag %x in reset trap\n",flag);
       return;
     } else {
