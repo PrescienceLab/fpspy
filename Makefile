@@ -19,10 +19,10 @@ LDFLAGS_FPSPY =  -lm -ldl
 CFLAGS_TOOL = -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/$(ARCH)
 LDFLAGS_TOOL =  -lm
 
-CFLAGS_TEST = -O2 -Wall -fno-strict-aliasing -pthread
+CFLAGS_TEST = -O2 -Wall -fno-strict-aliasing -pthread -D$(ARCH)
 LDFLAGS_TEST =  -lm 
 
-CFLAGS_ROUNDING = -O0 -Wall 
+CFLAGS_ROUNDING = -O0 -Wall -D$(ARCH)
 LDFLAGS_ROUNDING =  -lm
 
 
