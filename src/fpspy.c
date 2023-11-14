@@ -984,7 +984,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
   
-  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x rip %p\n",
+  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x ip %p\n",
         si->si_signo, si->si_errno, si->si_code, si->si_addr);
   DEBUG("TRAP ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
         (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
@@ -1071,7 +1071,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
 
-  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x rip %p \n",
+  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x ip %p \n",
         si->si_signo, si->si_errno, si->si_code, si->si_addr);
   DEBUG("FPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
         (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
@@ -1338,6 +1338,10 @@ static int bringup()
       return -1;
     }
   }
+
+  arch_fp_csr_t f;
+  arch_get_machine_fp_csr(&f);
+  DEBUG("machine fpcr=%016lx fpsr=%016lx\n",f.fpcr.val,f.fpsr.val);
   
   inited=1;
   DEBUG("Done with setup\n");
@@ -1437,7 +1441,11 @@ static __attribute__((constructor)) void fpspy_init(void)
   INFO("init\n");
   if (!inited) { 
     if (getenv("FPSPY_MODE")) {
-      if (!strcasecmp(getenv("FPSPY_MODE"),"individual")) { 
+      if (!strcasecmp(getenv("FPSPY_MODE"),"individual")) {
+	if (!arch_machine_supports_fp_traps()) {
+	  ERROR("FPSPY_MODE requests individual mode, but this machine does not support FP traps\n");
+	  abort();
+	}
 	mode=INDIVIDUAL;
 	DEBUG("Setting INDIVIDUAL mode\n");
       } else {

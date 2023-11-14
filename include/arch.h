@@ -60,6 +60,9 @@ uint64_t arch_cycle_count(void);
 void     arch_get_machine_fp_csr(arch_fp_csr_t *f);
 void     arch_set_machine_fp_csr(const arch_fp_csr_t *f);
 
+// Implementation must tell us if it supports FP traps or not
+int      arch_machine_supports_fp_traps(void);
+
 // Implementation must let us disable all traps, etc, and set FP defaults
 // so that we can perform FP ourselves within FPSpy when absolutely needed
 void     arch_config_fp_csr_for_local(arch_fp_csr_t *old);

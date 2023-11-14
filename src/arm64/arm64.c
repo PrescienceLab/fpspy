@@ -153,6 +153,25 @@ void arch_set_machine_fp_csr(const arch_fp_csr_t *f)
   sync_fp();
 }
 
+int      arch_machine_supports_fp_traps(void)
+{
+  uint64_t oldfpcr;
+
+  oldfpcr = get_fpcr_machine();
+   
+  set_fpcr_machine(-1UL);
+  sync_fp();
+
+  uint64_t fpcr=get_fpcr_machine();
+
+  set_fpcr_machine(oldfpcr);
+  sync_fp();
+  
+  return (fpcr & 0x9f00) == 0x9f00;
+}
+  
+
+
 void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
 {
   arch_get_machine_fp_csr(old);
@@ -221,7 +240,7 @@ static int set_fpsr(ucontext_t *uc, const fpsr_t *f)
 
   c->fpsr = f->val;
 
-  DEBUG("set_fpsr(%016lx) succeeds (written value is %08lx)\n",f->val,c->fpsr);
+  DEBUG("set_fpsr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpsr);
 
   return 0;
 }
@@ -253,7 +272,7 @@ static int set_fpcr(ucontext_t *uc, const fpcr_t *f)
 
   c->fpcr = f->val;
 
-  DEBUG("set_fpcr(%016lx) succeeds (written value is %08lx)\n",f->val,c->fpcr);
+  DEBUG("set_fpcr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpcr);
 
   return 0;
 }
@@ -337,10 +356,10 @@ void arch_set_trap(ucontext_t *uc, uint64_t *state)
     ENCODE(state,*target,2);  // "2"=> we are stashing the old instruction
     *target = BRK_INSTR;
   } else {
-    ERROR("no state on reset trap - just ignoring\n");
+    ERROR("no state on set trap - just ignoring\n");
   } 
 }
-
+  
 void arch_reset_trap(ucontext_t *uc, uint64_t *state)
 {
   uint32_t *target = (uint32_t*)(uc->uc_mcontext.pc);
@@ -348,17 +367,25 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state)
   if (state) {
     uint32_t flag;
     uint32_t instr;
+
     DECODE(state,instr,flag);
 
-    if (flag!=2 && flag!=0) {  // flag 0 = 1st trap to kick off machine
-      ERROR("Surprise state flag %x in reset trap\n",flag);
-      return;
-    } else {
+    switch (flag) {
+    case 0:    // flag 0 = 1st trap to kick off machine
+      DEBUG("skipping rewrite of instruction on first trap\n");
+      break;
+    case 2:    // flag 2 = trap due to inserted breakpoint instruction
+      DEBUG("about to overwrite target instruction at %p with %08x\n",target,instr);
       *target = instr;
+      break;
+    default:
+      ERROR("Surprise state flag %x in reset trap\n",flag);
+      break;
     }
   } else {
     ERROR("no state on reset trap - just ignoring\n");
   }
+  
 }
 
 void arch_clear_fp_exceptions(ucontext_t *uc)
