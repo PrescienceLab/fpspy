@@ -140,7 +140,7 @@ static inline void print(individual_trace_record_t *r, FILE *out)
 	  "%-16ld\t%s\t%016lx\t%016lx\t%08x\t%08x\t",
 	  r->time, op, (uint64_t)r->rip, (uint64_t)r->rsp, r->code, r->mxcsr);
 
-  for (i=0;i<15;i++) {
+  for (i=0;i<MAX_INSTR_SIZE;i++) {
     fprintf(out,"%02x", ((int) r->instruction[i]) & 0xff);
   }
 

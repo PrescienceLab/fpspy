@@ -1097,7 +1097,9 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     r.rsp = (void*) arch_get_sp(uc);
     r.code =  si->si_code;
     r.mxcsr =  arch_get_fp_csr(uc);
-    memcpy(r.instruction,r.rip,15);  // this is an x86ism, but should be OK for other archs
+    if (arch_get_instr_bytes(uc,(uint8_t *)r.instruction,MAX_INSTR_SIZE)<0) {
+      ERROR("Failed to fetch instruction bytes\n");
+    }
     r.pad = 0;
     
     if (writeall(mc->fd,&r,sizeof(r))) {

@@ -111,6 +111,7 @@ uint64_t arch_get_gp_csr(const ucontext_t *uc);
 uint64_t arch_get_ip(const ucontext_t *uc);
 uint64_t arch_get_sp(const ucontext_t *uc);
 
+int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size);
 
 int  arch_process_init(void);
 void arch_process_deinit(void);

@@ -303,6 +303,19 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
 }
 
 
+int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size)
+{
+  int len = size>15 ? 15 : size;
+  
+  if (size<0) {
+    return -1;
+  } else {
+    memcpy(dest,(const void *)uc->uc_mcontext.gregs[REG_RIP],len);
+    return len;
+  }
+}
+
+
 int  arch_process_init(void)
 {
   DEBUG("x64 process init\n");

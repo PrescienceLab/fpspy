@@ -122,6 +122,11 @@ uint64_t arch_get_ip(const ucontext_t *uc);
 uint64_t arch_get_sp(const ucontext_t *uc);
 
 
+// fill in dest with up to min(size,instruction size) instruction bytes
+// then return the number of number of bytes read, or negative on error
+int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size);
+
+
 // Implementation is initialized at start of process.  It can
 // veto by returning non-zero.   Implementation is also
 // initialized/deinitialized on each thread.
