@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -596,6 +597,17 @@ uint64_t arch_get_gp_csr(const ucontext_t *uc)
   return uc->uc_mcontext.pstate;
 }
 
+int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size)
+{
+  if (size<4) {
+    return -1;
+  } else {
+    memcpy(dest,(const void *)uc->uc_mcontext.pc,4);
+    return 4;
+  }
+}
+
+
 // representation is as 2 back to back 32 bit regs
 // FPCR : FPSR
 uint64_t arch_get_fp_csr(const ucontext_t *uc)
@@ -610,11 +622,72 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
   return (f.fpcr.val << 32) | (f.fpsr.val & 0xffffffff);
 }
 
+/*
+  The following is done because single step mode is typically not available for 
+  user programs, so, outside of a kernel module that enables it, we need to
+  use breakpoint instructions to clean up, and thus we need to be able
+  to write executable regions.
+
+  An alternative to this, which would work for post startup loads of code as well, 
+  would be to handle SEGV and then edit regions
+
+  A kernel module could also provide us with direct access to the cycle
+  counter so that we could have a real arch_cycle_count() - see HAVE_EL0_COUNTER_ACCESS
+  in arm64.h.
+
+  
+  
+ */
+static int make_my_exec_regions_writeable()
+{
+  DEBUG("making executable regions of memory map writeable to allow breakpoint insertion...\n");
+  DEBUG("yes, this is as hideous as it sounds...\n");
+
+  FILE *f = fopen("/proc/self/maps", "r");
+
+  if (!f) {
+    ERROR("cannot open /proc/self/maps\n");
+    return -1;
+  }
+  
+  char line_buf[256];
+  
+  while (!feof(f)) {
+    off_t start, end;
+    char flags[5];  // "rwxp\0"
+    if (fgets(line_buf, 256, f) == 0) {
+      //DEBUG("cannot fetch line... (soft failure)\n");
+      break;
+    }
+    int count = sscanf(line_buf, "%lx-%lx %s\n", &start, &end, flags);
+    if (count == 3) {
+      if (flags[2] == 'x' && flags[0]=='r' && flags[1]!='w') {
+	DEBUG("mprotecting this region as rwx: %s\n", line_buf);
+	void *s = (void*)start;
+	off_t len = end-start;
+	int flags = PROT_READ | PROT_WRITE | PROT_EXEC;
+	//	DEBUG("mprotect(%p,0x%lx,0x%x)\n",s,len,flags);
+	if (mprotect(s,len,flags)) {
+	  ERROR("failed to mptoect this region as rwx: %s",line_buf);
+	  fclose(f);
+	  return -1;
+	}
+      } else {
+	//DEBUG("ignoring this region: %s",line_buf);
+      }
+    } else {
+      DEBUG("unparseable region: %s\n",line_buf);
+    }
+  }
+  DEBUG("completed mprotects\n");
+  fclose(f);
+  return 0;
+}  
 
 int  arch_process_init(void)
 {
   DEBUG("arm64 process init\n");
-  return 0;
+  return make_my_exec_regions_writeable();
 }
 
 void arch_process_deinit(void)
