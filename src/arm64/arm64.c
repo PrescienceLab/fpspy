@@ -34,6 +34,11 @@
   FPSR[4:0]   => FPSCR[4:0] (IXC, UFC, OFC, DZC, IOC)
   
 
+  Note that when a trap is enabled, this DISABLES recording of the event in the exception bit.
+  That is, if fpcr.dze=1, and a divide by zero happens, then fpsr.dzc remains at O!
+
+
+
   Unclear how Neon, etc fit into this.  
 
 */
@@ -225,7 +230,7 @@ static int get_fpsr(const ucontext_t *uc, fpsr_t *f)
 
   f->val = c->fpsr;
 
-  DEBUG("get_fpsr returns %016lx\n",f->val);
+  // DEBUG("get_fpsr returns %016lx\n",f->val);
 
   return 0;
 }
@@ -241,7 +246,7 @@ static int set_fpsr(ucontext_t *uc, const fpsr_t *f)
 
   c->fpsr = f->val;
 
-  DEBUG("set_fpsr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpsr);
+  // DEBUG("set_fpsr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpsr);
 
   return 0;
 }
@@ -257,7 +262,7 @@ static int get_fpcr(const ucontext_t *uc, fpcr_t *f)
 
   f->val = c->fpcr;
  
-  DEBUG("get_fpcr returns %016lx\n",f->val);
+  //  DEBUG("get_fpcr returns %016lx\n",f->val);
  
   return 0;
 }
@@ -273,7 +278,7 @@ static int set_fpcr(ucontext_t *uc, const fpcr_t *f)
 
   c->fpcr = f->val;
 
-  DEBUG("set_fpcr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpcr);
+  // DEBUG("set_fpcr(%016lx) succeeds (written value is %08x)\n",f->val,c->fpcr);
 
   return 0;
 }
@@ -353,9 +358,12 @@ void arch_set_trap(ucontext_t *uc, uint64_t *state)
 {
   uint32_t *target = (uint32_t*)(uc->uc_mcontext.pc + 4); // all instructions are 4 bytes
 
-  if (state) { 
+  if (state) {
+    //uint32_t old = *target;
     ENCODE(state,*target,2);  // "2"=> we are stashing the old instruction
     *target = BRK_INSTR;
+    __builtin___clear_cache(target,((void*)target)+4);
+    //DEBUG("breakpoint instruction (%08x) inserted at %p overwriting %08x (state %016lx)\n",*target, target,old,*state);
   } else {
     ERROR("no state on set trap - just ignoring\n");
   } 
@@ -373,11 +381,12 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state)
 
     switch (flag) {
     case 0:    // flag 0 = 1st trap to kick off machine
-      DEBUG("skipping rewrite of instruction on first trap\n");
+      // DEBUG("skipping rewrite of instruction on first trap\n");
       break;
     case 2:    // flag 2 = trap due to inserted breakpoint instruction
-      DEBUG("about to overwrite target instruction at %p with %08x\n",target,instr);
       *target = instr;
+      __builtin___clear_cache(target,((void*)target)+4);
+      //DEBUG("target at %p has been restored to original instruction %08x\n",target,instr);
       break;
     default:
       ERROR("Surprise state flag %x in reset trap\n",flag);
@@ -662,7 +671,7 @@ static int make_my_exec_regions_writeable()
     int count = sscanf(line_buf, "%lx-%lx %s\n", &start, &end, flags);
     if (count == 3) {
       if (flags[2] == 'x' && flags[0]=='r' && flags[1]!='w') {
-	DEBUG("mprotecting this region as rwx: %s\n", line_buf);
+	DEBUG("mprotecting this region as rwx: %s", line_buf);
 	void *s = (void*)start;
 	off_t len = end-start;
 	int flags = PROT_READ | PROT_WRITE | PROT_EXEC;

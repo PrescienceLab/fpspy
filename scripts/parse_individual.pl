@@ -25,8 +25,8 @@ open(RAW,'<:raw', $file) or die "Failed to open $file\n";
 
 #
 # PAD - WE NEED TO DECODE MXCSR denorm here to correctly account for denorms
-#
-#
+#       
+# PAD - THIS IS HORRIBLE AND WILL ONLY WORK FOR X64
 
 while (1) {
     $n = read(RAW,$rec, 32);  
@@ -40,7 +40,7 @@ while (1) {
     if (!defined($dec)) { 
 	$dec = "UNDEF"
     }
-    if ($mxcsr & 0x2) {
+    if (($code != 0xffffffff) && ($mxcsr & 0x2)) {
       $dec.="-FPE_DENORM";
     }
     print sprintf("%-16ld\t%s\t%016x\t%016x\t%08x\t%08x\t",$time, $dec, $rip,$rsp,$code,$mxcsr);

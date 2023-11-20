@@ -1101,7 +1101,10 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
       ERROR("Failed to fetch instruction bytes\n");
     }
     r.pad = 0;
-    
+
+    //    DEBUG("writing record: %lu ip=%p sp=%p code=0x%x, fpcsr=%08x, inst=%08x\n",
+    //           r.time, r.rip, r.rsp, r.code, r.mxcsr, *(uint32_t*)r.instruction);
+
     if (writeall(mc->fd,&r,sizeof(r))) {
       ERROR("Failed to write record\n");
     }
@@ -1123,6 +1126,9 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
     break;
   }
+
+  DEBUG("FPE %s\n", buf);
+  
 #endif
       
   if (mc->state == AWAIT_FPE) {
