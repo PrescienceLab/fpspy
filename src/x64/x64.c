@@ -101,6 +101,10 @@ void arch_set_machine_fp_csr(const arch_fp_csr_t *f)
   set_mxcsr(f->val);
 }
 
+int      arch_machine_supports_fp_traps(void)
+{
+  return 1;
+}
 
 void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
 {

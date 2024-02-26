@@ -6,8 +6,8 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-#ARCH=x64
-ARCH=arm64
+ARCH=x64
+#ARCH=arm64
 
 CC = gcc
 LD = ld
@@ -31,8 +31,8 @@ all: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/trace_print bin/$(A
 
 
 
-bin/$(ARCH)/fpspy.so: src/fpspy.c include/*.h src/$(ARCH)/*.c include/$(ARCH)/*.h
-	$(CC) $(CFLAGS_FPSPY) src/fpspy.c src/$(ARCH)/*.c $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
+bin/$(ARCH)/fpspy.so: src/fpspy.c include/*.h src/$(ARCH)/*.c src/$(ARCH)/*.S include/$(ARCH)/*.h 
+	$(CC) $(CFLAGS_FPSPY) src/fpspy.c src/$(ARCH)/*.c src/$(ARCH)/*.S $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
 
 bin/$(ARCH)/test_fpspy: test/test_fpspy.c
 	$(CC) $(CFLAGS_TEST) test/test_fpspy.c $(LDFLAGS_TEST) -o bin/$(ARCH)/test_fpspy

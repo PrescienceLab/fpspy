@@ -76,7 +76,7 @@ uint64_t arch_cycle_count(void);
 void     arch_get_machine_fp_csr(arch_fp_csr_t *f);
 void     arch_set_machine_fp_csr(const arch_fp_csr_t *f);
 
-int      arch_machine_supports_fp_traps(void) { return 1; }
+int      arch_machine_supports_fp_traps(void);
 
 void     arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old);
 

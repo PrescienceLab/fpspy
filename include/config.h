@@ -11,3 +11,12 @@
 
 // maximum number of contexts (threads) that we can support in a process
 #define MAX_CONTEXTS 1024
+
+
+// support for FPVM kernel module
+#define CONFIG_TRAP_SHORT_CIRCUITING 1
+
+#if !defined(x64) && CONFIG_TRAP_SHORT_CIRCUITING
+#warn Disabling short circuiting as it is not available on this architecture
+#define CONFIG_TRAP_SHORT_CIRCUITING 0
+#endif

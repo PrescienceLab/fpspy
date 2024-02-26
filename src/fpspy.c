@@ -83,6 +83,13 @@
 #include "arch.h"
 #include "trace_record.h"
 
+// trap short-circuiting support from FPVM
+// this allows much faster response to FP traps
+// when the kernel module is available
+#if CONFIG_TRAP_SHORT_CIRCUITING
+#include <sys/ioctl.h>
+#include "fpvm_ioctl.h"
+#endif
 
 //
 // per-process state
@@ -97,6 +104,8 @@ static uint32_t orig_round_config;   // the FP rounding setup encountered at sta
 //
 volatile static int maxcount=-1;     // maximum number of events to record, per thread (-1=> no limit)
 volatile static int sample_period=1; // sample period 1 => record every event
+
+volatile static int kernel=0;                      // are we using kernel support?
 
 volatile static int timers=0;                      // are we using timing-based sampling?
 volatile static uint64_t on_mean_us, off_mean_us;  // parameters for poisson sampling
@@ -1059,24 +1068,12 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
   DEBUG("TRAP done\n");
 }
 
-
-
-//
-// FPSpy gets a SIGFPE when the current instruction is an FP instruction
-// that has caused an FP exception that we care about.  This should
-// only happen in the AWAIT_FPE state.
-//
-static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
+// FPSpy gets here when the current instruction is a FP instruction that
+// has generated an FP trap we care about.
+// This should only happen in the AWAIT_FPE state.
+static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
-  ucontext_t *uc = (ucontext_t *)priv;
-
-  DEBUG("FPE signo 0x%x errno 0x%x code 0x%x ip %p \n",
-        si->si_signo, si->si_errno, si->si_code, si->si_addr);
-  DEBUG("FPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
-        (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
-	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
-    
 
   if (!mc) {
     arch_clear_fp_exceptions(uc);
@@ -1085,7 +1082,7 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
       arch_set_round_config(uc,orig_round_config);
     }
     arch_reset_trap(uc,0); // best effort
-    abort_operation("Cannot find monitoring context during sigfpe_handler exec");
+    abort_operation("Cannot find monitoring context during fp_trap_handler exec");
     return;
   }
 
@@ -1110,26 +1107,6 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     }
   }
   
-#if DEBUG_OUTPUT
-  char buf[80];
-#define CASE(X) case X : strcpy(buf, #X); break; 
-  switch (si->si_code) {
-    CASE(FPE_FLTDIV);
-    CASE(FPE_FLTINV);
-    CASE(FPE_FLTOVF);
-    CASE(FPE_FLTUND);
-    CASE(FPE_FLTRES);
-    CASE(FPE_FLTSUB);
-    CASE(FPE_INTDIV);
-    CASE(FPE_INTOVF);
-  default:
-    sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
-    break;
-  }
-
-  DEBUG("FPE %s\n", buf);
-  
-#endif
       
   if (mc->state == AWAIT_FPE) {
     arch_clear_fp_exceptions(uc);
@@ -1146,10 +1123,175 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
       arch_set_round_config(uc,orig_round_config);
     }
     arch_reset_trap(uc,&mc->trap_state);
-    abort_operation("Surprise state during sigfpe_handler exec");
+    abort_operation("Surprise state during fp_trap_handler exec");
   }
-  DEBUG("FPE done\n");
 }
+
+
+//
+// This is the entry for FP traps when regular SIGFPEs are used
+//
+static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
+{  
+  ucontext_t *uc = (ucontext_t *)priv;
+
+  DEBUG("SIGFPE signo 0x%x errno 0x%x code 0x%x ip %p \n",
+        si->si_signo, si->si_errno, si->si_code, si->si_addr);
+  DEBUG("SIGFPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
+        (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
+	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
+  
+#if DEBUG_OUTPUT
+  char buf[80];
+#undef CASE
+#define CASE(X) case X : strcpy(buf, #X); break; 
+  switch (si->si_code) {
+    CASE(FPE_FLTDIV);
+    CASE(FPE_FLTINV);
+    CASE(FPE_FLTOVF);
+    CASE(FPE_FLTUND);
+    CASE(FPE_FLTRES);
+    CASE(FPE_FLTSUB);
+    CASE(FPE_INTDIV);
+    CASE(FPE_INTOVF);
+  default:
+    sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
+    break;
+  }
+  
+  DEBUG("FPE %s\n", buf);
+
+#endif
+
+  fp_trap_handler(si,uc);
+
+  DEBUG("SIGFPE done\n");
+}
+
+//
+// Entry point for FP Trap for trap short circuiting (kernel module)
+//
+#if CONFIG_TRAP_SHORT_CIRCUITING
+// this is currently completely x64-specific
+
+// no need to manipulate mxcsr since all code here
+// that might affect it should already safely wrap
+// what is doing
+
+static uint32_t get_mxcsr() {
+  uint32_t val = 0;
+  __asm__ __volatile__("stmxcsr %0" : "=m"(val) : : "memory");
+  return val;
+}
+
+
+static inline void fxsave(struct _libc_fpstate *fpregs)
+{
+  __asm__ __volatile__("fxsave (%0)" :: "r"(fpregs));
+}
+
+static inline void fxrstor(const struct _libc_fpstate *fpvm_fpregs)
+{
+  __asm__ __volatile__("fxrstor (%0)" :: "r"(fpvm_fpregs));
+}
+
+
+// note that unlike FPVM, the handler WILL NOT and MUST NOT
+// change any state except for possibly changing
+// rflags.TF and mxcsr.trap bits
+void fpspy_short_circuit_handler(void *priv)
+{
+  // Build up a sufficiently detailed ucontext_t and
+  // call the shared handler.  Copy in/out the FP and GP
+  // state 
+  
+  siginfo_t fake_siginfo = {0};     
+  struct _libc_fpstate fpregs; 
+  ucontext_t fake_ucontext;
+  uint32_t old;
+  
+  // capture FP state (note that this eventually needs to do xsave)
+  fxsave(&fpregs);
+
+  old = get_mxcsr();
+  
+  uint32_t err = ~(old >> 7) & old;
+  if (err & 0x001) {	/* Invalid op*/
+    fake_siginfo.si_code = FPE_FLTINV;
+  } else if (err & 0x004) { /* Divide by Zero */
+    fake_siginfo.si_code = FPE_FLTDIV;
+  } else if (err & 0x008) { /* Overflow */
+    fake_siginfo.si_code = FPE_FLTOVF;
+  } else if (err & 0x012) { /* Denormal, Underflow */
+    fake_siginfo.si_code = FPE_FLTUND;
+  } else if (err & 0x020) { /* Precision */
+    fake_siginfo.si_code = FPE_FLTRES;
+  }
+  
+  siginfo_t * si = (siginfo_t *)&fake_siginfo;
+
+  fake_ucontext.uc_mcontext.fpregs = &fpregs;
+
+  // consider memcpy
+  for (int i = 0; i < 18; i++) {
+    fake_ucontext.uc_mcontext.gregs[i] = *((greg_t*)priv + i);
+  }
+
+  ucontext_t *uc = (ucontext_t *)&fake_ucontext;
+ 
+  uint8_t *rip = (uint8_t*) uc->uc_mcontext.gregs[REG_RIP];
+
+  DEBUG(
+	"SCFPE signo 0x%x errno 0x%x code 0x%x rip %p %02x %02x %02x %02x %02x "
+	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+	si->si_signo, si->si_errno, si->si_code, si->si_addr, rip[0], rip[1], rip[2], rip[3], rip[4],
+	rip[5], rip[6], rip[7], rip[8], rip[9], rip[10], rip[11], rip[12], rip[13], rip[14], rip[15]);
+  DEBUG("SCFPE RIP=%p RSP=%p\n", rip, (void *)uc->uc_mcontext.gregs[REG_RSP]);
+  
+#if DEBUG_OUTPUT
+  char buf[80];
+#undef CASE
+#define CASE(X)      \
+  case X:            \
+    strcpy(buf, #X); \
+    break;
+  switch (si->si_code) {
+    CASE(FPE_FLTDIV);
+    CASE(FPE_FLTINV);
+    CASE(FPE_FLTOVF);
+    CASE(FPE_FLTUND);
+    CASE(FPE_FLTRES);
+    CASE(FPE_FLTSUB);
+    CASE(FPE_INTDIV);
+    CASE(FPE_INTOVF);
+  default:
+    sprintf(buf, "UNKNOWN(0x%x)\n", si->si_code);
+    break;
+  }
+  DEBUG("FPE exceptions: %s\n", buf);
+#endif
+  
+  fp_trap_handler(si,uc);
+
+  
+  // restore FP state (note that this eventually needs to do xsave)
+  // really, the only thing that should change is mxcsr, so this is
+  // doing too much work
+  fxrstor(&fpregs);
+
+  DEBUG("SCFPE  done\n");
+
+  return;
+}
+#endif
+
+
+
+//
+// FPSpy gets a SIGFPE when the current instruction is an FP instruction
+// that has caused an FP exception that we care about.  This should
+// only happen in the AWAIT_FPE state.
+//
 
 static __attribute__((destructor)) void fpspy_deinit(void);
 
@@ -1291,6 +1433,33 @@ static int bringup()
       timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
       timer_type==ITIMER_PROF ? SIGPROF : SIGALRM;
     
+#if CONFIG_TRAP_SHORT_CIRCUITING
+    if (kernel) { 
+      int file_desc = open("/dev/fpvm_dev", O_RDWR);
+      
+      if (file_desc < 0) {
+	ERROR("SC failed to open kernel support (/dev/fpvm_dev), falling back to signal handler\n");
+	goto setup_sigfpe;
+      } else {
+	extern void * _user_fpspy_entry;
+	// does each thread need to do this as well?
+	if (ioctl(file_desc, FPVM_IOCTL_REG, &_user_fpspy_entry)) {
+	  ERROR("SC failed to ioctl kernel support (/dev/fpvm_dev), falling back to signal handler\n");
+	  goto setup_sigfpe;
+	} else {
+	  DEBUG(":) kernel support setup successful\n");
+	  goto skip_setup_sigfpe;
+	} 
+      }
+    }else {
+      DEBUG("skipping kernel support, even though it is enabled\n");
+      goto setup_sigfpe;
+    }
+    
+  setup_sigfpe:
+
+#endif
+    
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1298,8 +1467,11 @@ static int bringup()
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTRAP);
     if (timers) {sigaddset(&sa.sa_mask, alarm_sig);}
-    
     ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
+    
+#if CONFIG_TRAP_SHORT_CIRCUITING
+  skip_setup_sigfpe:
+#endif
     
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
@@ -1349,7 +1521,12 @@ static int bringup()
 
   arch_fp_csr_t f;
   arch_get_machine_fp_csr(&f);
+#if ARM
   DEBUG("machine fpcr=%016lx fpsr=%016lx\n",f.fpcr.val,f.fpsr.val);
+#endif
+#if x64
+  DEBUG("machine fpcsr=%08x\n",f.val);
+#endif
   
   inited=1;
   DEBUG("Done with setup\n");
@@ -1483,6 +1660,10 @@ static __attribute__((constructor)) void fpspy_init(void)
     if (getenv("FPSPY_SAMPLE")) {
       sample_period = atoi(getenv("FPSPY_SAMPLE"));
       DEBUG("Setting sample period to %d\n", sample_period);
+    }
+    if (getenv("FPSPY_KERNEL") && tolower(getenv("FPSPY_KERNEL")[0])=='y') {
+      DEBUG("Attempting to use FPSpy (i.e., FPVM) kernel suppport\n");
+      kernel = 1;
     }
     if (getenv("FPSPY_POISSON")) {
       if (sscanf(getenv("FPSPY_POISSON"),"%lu:%lu",&on_mean_us,&off_mean_us)!=2) {

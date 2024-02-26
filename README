@@ -126,6 +126,11 @@ or
 
 make test_dopey (virtual or profile time)
 
+FPSPY_KERNEL=y|n  (default n)
+
+Attempt to use kernel support to make FP traps faster.
+This is the same support as in FPVM and uses the same kernel module
+
 Forced changes in floating point execution environment
 
 FPSPY_FORCE_ROUNDING=positive|negative|zero|nearest[;daz][;ftz]
