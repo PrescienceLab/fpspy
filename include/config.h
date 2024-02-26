@@ -17,6 +17,7 @@
 #define CONFIG_TRAP_SHORT_CIRCUITING 1
 
 #if !defined(x64) && CONFIG_TRAP_SHORT_CIRCUITING
-#warn Disabling short circuiting as it is not available on this architecture
+#warning Disabling short circuiting as it is not available on this architecture
+#undef CONFIG_TRAP_SHORT_CIRCUITING
 #define CONFIG_TRAP_SHORT_CIRCUITING 0
 #endif
