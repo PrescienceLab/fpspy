@@ -107,6 +107,9 @@ volatile static int sample_period=1; // sample period 1 => record every event
 
 volatile static int kernel=0;                      // are we using kernel support?
 
+volatile static int kernel_fd = -1;
+
+
 volatile static int timers=0;                      // are we using timing-based sampling?
 volatile static uint64_t on_mean_us, off_mean_us;  // parameters for poisson sampling
 volatile static int timer_type = ITIMER_REAL;      // which time base we are using
@@ -1366,6 +1369,19 @@ static int bringup_monitoring_context(int tid)
     return -1;
   }
 
+#if CONFIG_TRAP_SHORT_CIRCUITING
+  if (kernel && kernel_fd!=-1) { 
+    extern void * _user_fpspy_entry;
+    if (ioctl(kernel_fd, FPVM_IOCTL_REG, &_user_fpspy_entry)) {
+      ERROR("SC failed to ioctl kernel support (/dev/fpvm_dev), very bad\n");
+      abort_operation("thread failed to ioctl kernel support\n");
+      return -1;
+    } else {
+      DEBUG("thread kernel setup successful\n");
+    }
+  }
+#endif
+  
   c->start_time = arch_cycle_count();
   c->state = INIT;
   c->aborting_in_trap = 0;
@@ -1391,6 +1407,7 @@ static int teardown_monitoring_context(int tid)
   // deinit_sampler(&mc->sampler);
  
   close(mc->fd);
+
   free_monitoring_context(tid);
 
   DEBUG("Tore down monitoring context for %d\n",tid);
@@ -1418,14 +1435,7 @@ static int bringup()
   ORIG_IF_CAN(feclearexcept,exceptmask);
   
   if (mode==INDIVIDUAL) {
-    
-    init_monitoring_contexts();
-    
-    if (bringup_monitoring_context(gettid())) { 
-      ERROR("Failed to start up monitoring context at startup\n");
-      return -1;
-    }
-    
+
     struct sigaction sa;
     
     int alarm_sig =
@@ -1433,31 +1443,32 @@ static int bringup()
       timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
       timer_type==ITIMER_PROF ? SIGPROF : SIGALRM;
     
+    init_monitoring_contexts();
+    
 #if CONFIG_TRAP_SHORT_CIRCUITING
-    if (kernel) { 
-      int file_desc = open("/dev/fpvm_dev", O_RDWR);
-      
-      if (file_desc < 0) {
+    // need to do this early because we rely on bringup_monitoring_context
+    if (kernel && kernel_fd==-1) { 
+      kernel_fd = open("/dev/fpvm_dev", O_RDWR);
+      if (kernel_fd < 0) {
 	ERROR("SC failed to open kernel support (/dev/fpvm_dev), falling back to signal handler\n");
-	goto setup_sigfpe;
-      } else {
-	extern void * _user_fpspy_entry;
-	// does each thread need to do this as well?
-	if (ioctl(file_desc, FPVM_IOCTL_REG, &_user_fpspy_entry)) {
-	  ERROR("SC failed to ioctl kernel support (/dev/fpvm_dev), falling back to signal handler\n");
-	  goto setup_sigfpe;
-	} else {
-	  DEBUG(":) kernel support setup successful\n");
-	  goto skip_setup_sigfpe;
-	} 
       }
-    }else {
+    } else {
       DEBUG("skipping kernel support, even though it is enabled\n");
-      goto setup_sigfpe;
+    }
+#endif
+
+    if (bringup_monitoring_context(gettid())) {
+      // this can now happen due to bad kernel module
+      // so should really do graceful abort
+      ERROR("Failed to start up monitoring context at startup\n");
+      return -1;
     }
     
-  setup_sigfpe:
-
+#if CONFIG_TRAP_SHORT_CIRCUITING
+    if (kernel && kernel_fd>0) {
+      goto skip_setup_sigfpe;
+    }
+    
 #endif
     
     memset(&sa,0,sizeof(sa));
@@ -1758,6 +1769,11 @@ static __attribute__((destructor)) void fpspy_deinit(void)
 	  close(context[i].fd);
 	}
       }
+#if CONFIG_TRAP_SHORT_CIRCUITING
+      if (kernel && kernel_fd>0) {
+	close(kernel_fd);
+      }
+#endif
     }
   }
   arch_process_deinit();
