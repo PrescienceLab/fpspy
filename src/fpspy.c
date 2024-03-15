@@ -1309,17 +1309,9 @@ static void sigalrm_handler(int sig, siginfo_t *si,  void *priv)
 static int bringup_monitoring_context(int tid)
 {
   monitoring_context_t *c;
-  char name[80];
 
   if (!(c = alloc_monitoring_context(tid))) { 
     ERROR("Cannot allocate monitoring context\n");
-    return -1;
-  }
-
-  sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), tid);
-  if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
-    ERROR("Cannot open monitoring output file\n");
-    free_monitoring_context(tid);
     return -1;
   }
 
