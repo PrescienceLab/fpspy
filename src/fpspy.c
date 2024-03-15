@@ -1081,58 +1081,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 // This should only happen in the AWAIT_FPE state.
 static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
-  monitoring_context_t *mc = find_monitoring_context(gettid());
-
-  if (!mc) {
-    arch_clear_fp_exceptions(uc);
-    arch_mask_fp_traps(uc);
-    if (control_round_config) {
-      arch_set_round_config(uc,orig_round_config);
-    }
-    arch_reset_trap(uc,0); // best effort
-    abort_operation("Cannot find monitoring context during fp_trap_handler exec");
-    return;
-  }
-
-  if (!(mc->count % sample_period)) { 
-    individual_trace_record_t r;  
-
-    r.time = arch_cycle_count() - mc->start_time;
-    r.rip = (void*) arch_get_ip(uc);
-    r.rsp = (void*) arch_get_sp(uc);
-    r.code =  si->si_code;
-    r.mxcsr =  arch_get_fp_csr(uc);
-    if (arch_get_instr_bytes(uc,(uint8_t *)r.instruction,MAX_INSTR_SIZE)<0) {
-      ERROR("Failed to fetch instruction bytes\n");
-    }
-    r.pad = 0;
-
-    //    DEBUG("writing record: %lu ip=%p sp=%p code=0x%x, fpcsr=%08x, inst=%08x\n",
-    //           r.time, r.rip, r.rsp, r.code, r.mxcsr, *(uint32_t*)r.instruction);
-
-    if (writeall(mc->fd,&r,sizeof(r))) {
-      ERROR("Failed to write record\n");
-    }
-  }
-  
-      
-  if (mc->state == AWAIT_FPE) {
-    arch_clear_fp_exceptions(uc);
-    arch_mask_fp_traps(uc);
-    if (control_round_config) {
-      arch_set_round_config(uc,our_round_config);
-    }
-    arch_set_trap(uc,&mc->trap_state);
-    mc->state = AWAIT_TRAP;
-  } else {
-    arch_clear_fp_exceptions(uc);
-    arch_mask_fp_traps(uc);
-    if (control_round_config) {
-      arch_set_round_config(uc,orig_round_config);
-    }
-    arch_reset_trap(uc,&mc->trap_state);
-    abort_operation("Surprise state during fp_trap_handler exec");
-  }
+  abort();
 }
 
 

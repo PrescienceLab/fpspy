@@ -1,7 +1,7 @@
 // whether DEBUG()s print or not
-#define DEBUG_OUTPUT 1
+#define DEBUG_OUTPUT 0
 // whether to eliminate all output
-#define NO_OUTPUT 0
+#define NO_OUTPUT 1
 
 // limits on the timing-based sampler, to make sure
 // that we don't generate random intervals that make no sense
