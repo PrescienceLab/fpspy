@@ -124,6 +124,8 @@ static uint32_t our_round_config = 0;     // if we control, what is the config w
 volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;  // our mode of operation
 volatile static int aggressive = 0;                            // whether we will ignore some target operations that would normally cause us to abort
 volatile static int disable_pthreads = 0;                      // whether to avoid pthread override
+volatile static int kickstart = 0;     // whether we start with external SIGTRAP or internal one (first process only)
+
 
 //
 // pointers to the functions we override to control the target
@@ -540,6 +542,9 @@ int fork()
 	
 	// now kick ourselves to set the sse bits; we are currently in state INIT
 	// this will also do the architectural init
+	
+	// note that kickstart only applies to "top-level" process
+	// not this child
 	kill(gettid(),SIGTRAP);
 	// we should now be in the right state
       }
@@ -1433,7 +1438,7 @@ static int bringup()
   }
   
   ORIG_IF_CAN(feclearexcept,exceptmask);
-  
+
   if (mode==INDIVIDUAL) {
 
     struct sigaction sa;
@@ -1444,7 +1449,7 @@ static int bringup()
       timer_type==ITIMER_PROF ? SIGPROF : SIGALRM;
     
     init_monitoring_contexts();
-    
+   
 #if CONFIG_TRAP_SHORT_CIRCUITING
     // need to do this early because we rely on bringup_monitoring_context
     if (kernel && kernel_fd==-1) { 
@@ -1463,7 +1468,7 @@ static int bringup()
       ERROR("Failed to start up monitoring context at startup\n");
       return -1;
     }
-    
+
 #if CONFIG_TRAP_SHORT_CIRCUITING
     if (kernel && kernel_fd>0) {
       goto skip_setup_sigfpe;
@@ -1479,7 +1484,7 @@ static int bringup()
     sigaddset(&sa.sa_mask, SIGTRAP);
     if (timers) {sigaddset(&sa.sa_mask, alarm_sig);}
     ORIG_IF_CAN(sigaction,SIGFPE,&sa,&oldsa_fpe);
-    
+
 #if CONFIG_TRAP_SHORT_CIRCUITING
   skip_setup_sigfpe:
 #endif
@@ -1493,7 +1498,7 @@ static int bringup()
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig); }
     sigaddset(&sa.sa_mask, SIGFPE); 
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
-    
+
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigint_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1502,7 +1507,7 @@ static int bringup()
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig);}
     
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
-    
+
     if (timers) {
       // only initialize timing if we need it
       DEBUG("Setting up timer interrupt handler\n");
@@ -1516,11 +1521,13 @@ static int bringup()
 		  &sa,&oldsa_alrm);
     }
     
-    ORIG_IF_CAN(feenableexcept,exceptmask);
-    
-    // now kick ourselves to set the sse bits; we are currently in state INIT
-    // this will also do the architecture init for the thread
-    kill(getpid(),SIGTRAP);
+    if (kickstart) {
+      INFO("Send SIGTRAP to process %d to start\n",getpid());
+    } else {
+      // now kick ourselves to set the sse bits; we are currently in state INIT
+      // this will also do the architecture init for the thread
+      kill(getpid(),SIGTRAP);
+    }
     
   } else {
     // we need to bring up the architectural state for the thread
@@ -1710,6 +1717,15 @@ static __attribute__((constructor)) void fpspy_init(void)
     }
     if (getenv("FPSPY_FORCE_ROUNDING")) {
       config_round_daz_ftz(getenv("FPSPY_FORCE_ROUNDING"));
+    }
+    if (getenv("FPSPY_KICKSTART") && tolower(getenv("FPSPY_KICKSTART")[0])=='y') {
+      DEBUG("Enabling external kickstart (send SIGTRAP to begin)\n");
+      kickstart=1;
+      // modify the environment variable so that children do
+      // not also wait
+      if (putenv("FPSPY_KICKSTART=n")) {
+	ERROR("failed to rewrite FPSPY_KICKSTART\n");
+      }
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");

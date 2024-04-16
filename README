@@ -117,7 +117,12 @@ interpretted as time spent awake, instead of time spent.   prof timer
 is virtual time in both kernel and user space, and using a signal
 the application is unlikely to be using.
 
-For getting a sense of how FPSPY_POISSON operates, you can
+FPSPY_KICKSTART=y|n
+
+If set to y, then FPSPY does not start on the initial process
+until a SIGTRAP is delivered externally.   Otherwise, it starts immediately
+
+For getting a sense of how FPSPY_POISSON operates, you cano
 also run:
 
 make test_sleepy  (real time)
