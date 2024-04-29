@@ -117,10 +117,21 @@ interpretted as time spent awake, instead of time spent.   prof timer
 is virtual time in both kernel and user space, and using a signal
 the application is unlikely to be using.
 
-FPSPY_KICKSTART=y|n
+FPSPY_KICKSTART=y|n  (default n)
 
 If set to y, then FPSPY does not start on the initial process
 until a SIGTRAP is delivered externally.   Otherwise, it starts immediately
+
+FPSPY_ABORT=y|n  (default n)
+
+If enabled, FPSPY will crash the program with SIGABRT on the first
+FPE caught at runtime. Especially useful for fuzzing.
+
+FPSPY_QUIET=y|n  (default n)
+
+If enabled, no output will print (runtime equivalent of defining
+DEBUG_OUTPUT=0 and NO_OUTPUT=1 at compile time).
+In addition, the monitor output file (*.fpemon) won't be created.
 
 For getting a sense of how FPSPY_POISSON operates, you cano
 also run:

@@ -125,6 +125,8 @@ volatile static enum {AGGREGATE,INDIVIDUAL} mode = AGGREGATE;  // our mode of op
 volatile static int aggressive = 0;                            // whether we will ignore some target operations that would normally cause us to abort
 volatile static int disable_pthreads = 0;                      // whether to avoid pthread override
 volatile static int kickstart = 0;     // whether we start with external SIGTRAP or internal one (first process only)
+volatile static int abort_on_fpe = 0;  // whether we abort (ie. crash with SIGARBT) the program on the first FPE
+volatile static int create_monitor_file = 1;  // whether we write a monitor output file (*.fpemon)
 
 
 //
@@ -1081,6 +1083,10 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 // This should only happen in the AWAIT_FPE state.
 static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
+  if (abort_on_fpe) {
+    abort();
+  }
+
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
   if (!mc) {
@@ -1367,11 +1373,13 @@ static int bringup_monitoring_context(int tid)
     return -1;
   }
 
-  sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), tid);
-  if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
-    ERROR("Cannot open monitoring output file\n");
-    free_monitoring_context(tid);
-    return -1;
+  if (create_monitor_file) {
+    sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), tid);
+    if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
+      ERROR("Cannot open monitoring output file\n");
+      free_monitoring_context(tid);
+      return -1;
+    }
   }
 
 #if CONFIG_TRAP_SHORT_CIRCUITING
@@ -1640,6 +1648,10 @@ static void config_round_daz_ftz(char *buf)
 // of the target
 static __attribute__((constructor)) void fpspy_init(void) 
 {
+  if (getenv("FPSPY_QUIET") && tolower(getenv("FPSPY_QUIET")[0])=='y') {
+    quiet = 1;
+    create_monitor_file = 0;
+  }
 
   INFO("init\n");
   if (!inited) { 
@@ -1726,6 +1738,9 @@ static __attribute__((constructor)) void fpspy_init(void)
       if (putenv("FPSPY_KICKSTART=n")) {
 	ERROR("failed to rewrite FPSPY_KICKSTART\n");
       }
+    }
+    if (getenv("FPSPY_ABORT") && tolower(getenv("FPSPY_ABORT")[0])=='y') {
+      abort_on_fpe = 1;
     }
     if (bringup()) { 
       ERROR("cannot bring up framework\n");
