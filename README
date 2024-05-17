@@ -127,11 +127,13 @@ FPSPY_ABORT=y|n  (default n)
 If enabled, FPSPY will crash the program with SIGABRT on the first
 FPE caught at runtime. Especially useful for fuzzing.
 
-FPSPY_QUIET=y|n  (default n)
+FPSPY_LOG_LEVEL=0|1|2  (default 2)
 
-If enabled, no output will print (runtime equivalent of defining
-DEBUG_OUTPUT=0 and NO_OUTPUT=1 at compile time).
-In addition, the monitor output file (*.fpemon) won't be created.
+If set to 0, DEBUG/ERROR/INFO statements will be disabled, and no monitor file
+(*.fpemon) will be created. If set to 1, DEBUG statements will be disabled, but
+ERROR/INFO statements will be enabled, and a monitor file will be created. If
+set to 2, all DEBUG/ERROR/INFO statements will be enabled, and a monitor file
+will be created.
 
 For getting a sense of how FPSPY_POISSON operates, you cano
 also run:

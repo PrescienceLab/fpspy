@@ -1,8 +1,3 @@
-// whether DEBUG()s print or not
-#define DEBUG_OUTPUT 1
-// whether to eliminate all output
-#define NO_OUTPUT 0
-
 // limits on the timing-based sampler, to make sure
 // that we don't generate random intervals that make no sense
 // given the limits of the kernel

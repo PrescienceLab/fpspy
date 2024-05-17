@@ -163,7 +163,7 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int, oldsa_alrm;
 // Wrappers for calling functions we have overriden
 //
 #define ORIG_RETURN(func,...) if (orig_##func) { return orig_##func(__VA_ARGS__); } else { ERROR("cannot call orig_" #func " returning zero\n"); return 0; }
-#define ORIG_IF_CAN(func,...) if (orig_##func) { if (!DEBUG_OUTPUT) { orig_##func(__VA_ARGS__); } else { DEBUG("orig_"#func" returns 0x%x\n",orig_##func(__VA_ARGS__)); } } else { DEBUG("cannot call orig_" #func " - skipping\n"); }
+#define ORIG_IF_CAN(func,...) if (orig_##func) { __auto_type rc = orig_##func(__VA_ARGS__); DEBUG("orig_"#func" returns 0x%x\n", rc); } else { DEBUG("cannot call orig_" #func " - skipping\n"); }
 //#define SHOW_CALL_STACK() DEBUG("callstack (3 deep) : %p -> %p -> %p\n", __builtin_return_address(3), __builtin_return_address(2), __builtin_return_address(1))
 //#define SHOW_CALL_STACK() DEBUG("callstack (2 deep) : %p -> %p\n", __builtin_return_address(2), __builtin_return_address(1))
 //#define SHOW_CALL_STACK() DEBUG("callstack (1 deep) : %p\n", __builtin_return_address(1))
@@ -1154,29 +1154,28 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   DEBUG("SIGFPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
         (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
 	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
+
+  if (log_level > 1) {
+    char buf[80];
+
+    switch (si->si_code) {
+      case FPE_FLTDIV : strcpy(buf, "FPE_FLTDIV"); break;
+      case FPE_FLTINV : strcpy(buf, "FPE_FLTINV"); break;
+      case FPE_FLTOVF : strcpy(buf, "FPE_FLTOVF"); break;
+      case FPE_FLTUND : strcpy(buf, "FPE_FLTUND"); break;
+      case FPE_FLTRES : strcpy(buf, "FPE_FLTRES"); break;
+      case FPE_FLTSUB : strcpy(buf, "FPE_FLTSUB"); break;
+      case FPE_INTDIV : strcpy(buf, "FPE_INTDIV"); break;
+      case FPE_INTOVF : strcpy(buf, "FPE_INTOVF"); break;
+    default:
+      sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
+      break;
+    }
+
+    DEBUG("FPE %s\n", buf);
   
-#if DEBUG_OUTPUT
-  char buf[80];
-#undef CASE
-#define CASE(X) case X : strcpy(buf, #X); break; 
-  switch (si->si_code) {
-    CASE(FPE_FLTDIV);
-    CASE(FPE_FLTINV);
-    CASE(FPE_FLTOVF);
-    CASE(FPE_FLTUND);
-    CASE(FPE_FLTRES);
-    CASE(FPE_FLTSUB);
-    CASE(FPE_INTDIV);
-    CASE(FPE_INTOVF);
-  default:
-    sprintf(buf,"UNKNOWN(0x%x)\n",si->si_code);
-    break;
   }
   
-  DEBUG("FPE %s\n", buf);
-
-#endif
-
   fp_trap_handler(si,uc);
 
   DEBUG("SIGFPE done\n");
@@ -1262,28 +1261,26 @@ void fpspy_short_circuit_handler(void *priv)
 	rip[5], rip[6], rip[7], rip[8], rip[9], rip[10], rip[11], rip[12], rip[13], rip[14], rip[15]);
   DEBUG("SCFPE RIP=%p RSP=%p\n", rip, (void *)uc->uc_mcontext.gregs[REG_RSP]);
   
-#if DEBUG_OUTPUT
-  char buf[80];
-#undef CASE
-#define CASE(X)      \
-  case X:            \
-    strcpy(buf, #X); \
-    break;
-  switch (si->si_code) {
-    CASE(FPE_FLTDIV);
-    CASE(FPE_FLTINV);
-    CASE(FPE_FLTOVF);
-    CASE(FPE_FLTUND);
-    CASE(FPE_FLTRES);
-    CASE(FPE_FLTSUB);
-    CASE(FPE_INTDIV);
-    CASE(FPE_INTOVF);
-  default:
-    sprintf(buf, "UNKNOWN(0x%x)\n", si->si_code);
-    break;
+  if (log_level > 1) {
+    char buf[80];
+
+    switch (si->si_code) {
+      case FPE_FLTDIV : strcpy(buf, "FPE_FLTDIV"); break;
+      case FPE_FLTINV : strcpy(buf, "FPE_FLTINV"); break;
+      case FPE_FLTOVF : strcpy(buf, "FPE_FLTOVF"); break;
+      case FPE_FLTUND : strcpy(buf, "FPE_FLTUND"); break;
+      case FPE_FLTRES : strcpy(buf, "FPE_FLTRES"); break;
+      case FPE_FLTSUB : strcpy(buf, "FPE_FLTSUB"); break;
+      case FPE_INTDIV : strcpy(buf, "FPE_INTDIV"); break;
+      case FPE_INTOVF : strcpy(buf, "FPE_INTOVF"); break;
+    default:
+      sprintf(buf, "UNKNOWN(0x%x)\n",si->si_code);
+      break;
+    }
+
+    DEBUG("FPE exceptions %s\n", buf);
+
   }
-  DEBUG("FPE exceptions: %s\n", buf);
-#endif
   
   fp_trap_handler(si,uc);
 
@@ -1648,9 +1645,20 @@ static void config_round_daz_ftz(char *buf)
 // of the target
 static __attribute__((constructor)) void fpspy_init(void) 
 {
-  if (getenv("FPSPY_QUIET") && tolower(getenv("FPSPY_QUIET")[0])=='y') {
-    quiet = 1;
-    create_monitor_file = 0;
+  if (getenv("FPSPY_LOG_LEVEL")) {
+    char* nptr = getenv("FPSPY_LOG_LEVEL");
+    char* endptr = NULL;
+    long ret = strtol(nptr, &endptr, 10);
+    if (*nptr != '\0' && *endptr == '\0' && 0 <= ret && ret <= 2) {
+        log_level = ret;
+    } else {
+        ERROR("FPSPY_LOG_LEVEL must be one of [0 | 1 | 2], but %ld was found\n", ret);
+        abort();
+    }
+
+    if (log_level == 0) {
+        create_monitor_file = 0;
+    }
   }
 
   INFO("init\n");
