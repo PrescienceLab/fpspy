@@ -129,11 +129,10 @@ FPE caught at runtime. Especially useful for fuzzing.
 
 FPSPY_LOG_LEVEL=0|1|2  (default 2)
 
-If set to 0, DEBUG/ERROR/INFO statements will be disabled, and no monitor file
-(*.fpemon) will be created. If set to 1, DEBUG statements will be disabled, but
-ERROR/INFO statements will be enabled, and a monitor file will be created. If
-set to 2, all DEBUG/ERROR/INFO statements will be enabled, and a monitor file
-will be created.
+If set to 0, DEBUG statements will be disabled, and no monitor file (*.fpemon)
+will be created. If set to 1, DEBUG statements will be disabled, and a
+monitor file will be created. If set to 2, all DEBUG statements will be
+enabled, and a monitor file will be created.
 
 For getting a sense of how FPSPY_POISSON operates, you cano
 also run:

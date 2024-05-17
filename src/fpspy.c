@@ -128,6 +128,7 @@ volatile static int kickstart = 0;     // whether we start with external SIGTRAP
 volatile static int abort_on_fpe = 0;  // whether we abort (ie. crash with SIGARBT) the program on the first FPE
 volatile static int create_monitor_file = 1;  // whether we write a monitor output file (*.fpemon)
 
+unsigned char log_level = 2; // how much log info
 
 //
 // pointers to the functions we override to control the target
@@ -1645,24 +1646,24 @@ static void config_round_daz_ftz(char *buf)
 // of the target
 static __attribute__((constructor)) void fpspy_init(void) 
 {
-  if (getenv("FPSPY_LOG_LEVEL")) {
-    char* nptr = getenv("FPSPY_LOG_LEVEL");
-    char* endptr = NULL;
-    long ret = strtol(nptr, &endptr, 10);
-    if (*nptr != '\0' && *endptr == '\0' && 0 <= ret && ret <= 2) {
-        log_level = ret;
-    } else {
-        ERROR("FPSPY_LOG_LEVEL must be one of [0 | 1 | 2], but %ld was found\n", ret);
-        abort();
-    }
-
-    if (log_level == 0) {
-        create_monitor_file = 0;
-    }
-  }
 
   INFO("init\n");
   if (!inited) { 
+    if (getenv("FPSPY_LOG_LEVEL")) {
+      char* nptr = getenv("FPSPY_LOG_LEVEL");
+      char* endptr = NULL;
+      long ret = strtol(nptr, &endptr, 10);
+      if (*nptr != '\0' && *endptr == '\0' && 0 <= ret && ret <= 2) {
+          log_level = ret;
+      } else {
+          ERROR("FPSPY_LOG_LEVEL must be one of [0 | 1 | 2], but %ld was found\n", ret);
+          abort();
+      }
+
+      if (log_level == 0) {
+          create_monitor_file = 0;
+      }
+    }
     if (getenv("FPSPY_MODE")) {
       if (!strcasecmp(getenv("FPSPY_MODE"),"individual")) {
 	if (!arch_machine_supports_fp_traps()) {
