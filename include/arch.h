@@ -12,7 +12,9 @@ typedef enum {
   FPSPY_ROUND_NEAREST=0,
   FPSPY_ROUND_NEGATIVE=1,
   FPSPY_ROUND_POSITIVE=2,
-  FPSPY_ROUND_ZERO=3
+  FPSPY_ROUND_ZERO=3,
+  FPSPY_ROUND_NEAREST_MAXMAG=4,
+  FPSPY_ROUND_DYNAMIC=5
 } fpspy_round_mode_t;
 
 typedef enum {
@@ -32,6 +34,8 @@ typedef enum {
 #include "x64/x64.h"
 #elif defined(arm64)
 #include "arm64/arm64.h"
+#elif defined(riscv64)
+#include "riscv64/riscv64.h"
 #else
 
 //
