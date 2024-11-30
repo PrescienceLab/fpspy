@@ -16,3 +16,6 @@
 #undef CONFIG_TRAP_SHORT_CIRCUITING
 #define CONFIG_TRAP_SHORT_CIRCUITING 0
 #endif
+
+// have our magical RISC-V FP Traps?
+#define CONFIG_RISCV_HAVE_FP_TRAPS 0

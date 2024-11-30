@@ -6,12 +6,20 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-ARCH=x64
+#ARCH=x64
 #ARCH=arm64
+ARCH=riscv64
 
-CC = gcc
-LD = ld
-AR = ar
+# hard coded assuming we are doing cross-compilation
+ifeq ($(ARCH),riscv64)
+  PREFIX=riscv64-unknown-linux-gnu-
+else
+  PREFIX=
+endif
+
+CC = $(PREFIX)gcc
+LD = $(PREFIX)ld
+AR = $(PREFIX)ar
 
 CFLAGS_FPSPY = -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/$(ARCH) -D$(ARCH)
 LDFLAGS_FPSPY =  -lm -ldl
