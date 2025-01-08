@@ -87,8 +87,8 @@ static void set_fcsr_machine(uint64_t f)
 // bits 0..4 in upper half of fake csr are all 1
 static uint64_t ften_base = 0x1f00000000UL; 
 
-#define BOGUS_FLAG_MASK     (ften_base>>32)
-#define BOGUS_ENABLE_MASK   ften_base
+#define FLAG_MASK     (ften_base>>32)
+#define ENABLE_MASK   ften_base
 
 // clearing the mask => enable all
 void arch_clear_trap_mask(void)
@@ -146,7 +146,7 @@ void arch_reset_trap_mask(int which)
 
 // FCSR used when *we* are executing floating point code
 // All masked, flags zeroed, round nearest, special features off
-#define FCSR_OURS   0x1f00000000UL
+#define FCSR_OURS   0x0000000000UL
 
 void arch_get_machine_fp_csr(arch_fp_csr_t *f)
 {
@@ -231,9 +231,11 @@ static uint32_t *get_fpcsr_ptr(ucontext_t *uc)
 static int get_fpcsr(const ucontext_t *uc, arch_fp_csr_t *f)
 {
   const uint32_t *fpcsr = get_fpcsr_ptr((ucontext_t*)uc);
+
   if (fpcsr) { 
-    f->val = (uint64_t) *fpcsr;
-    // BOGUS PAD - get FP Trap State Here and include in val
+    uint32_t ften;
+    __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
+    f->val = ((uint64_t) *fpcsr) | ((uint64_t) ften << 32);
     return 0;
   } else {
     return -1;
@@ -248,7 +250,8 @@ static int set_fpcsr(ucontext_t *uc, const arch_fp_csr_t *f)
     uint32_t lower = (uint32_t)f->val;
     uint32_t __attribute__((unused)) upper = (uint32_t)(f->val >> 32);
     *fpcsr = lower;
-    // BOGUS PAD - set FP Trap State Here
+
+    __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(lower));
     return 0;
   } else {
     return -1;
@@ -364,7 +367,7 @@ void arch_clear_fp_exceptions(ucontext_t *uc)
     return;
   }
 
-  f.val &= ~BOGUS_FLAG_MASK;
+  f.val &= ~FLAG_MASK;
 
   if (set_fpcsr(uc,&f)) {
     ERROR("failed to set fpcsr from context\n");
@@ -381,7 +384,7 @@ void arch_mask_fp_traps(ucontext_t *uc)
     return;
   }
 
-  f.val &= ~BOGUS_ENABLE_MASK;
+  f.val &= ~ENABLE_MASK;
 
   if (set_fpcsr(uc,&f)) {
     ERROR("failed to set fpcsr from context\n");
@@ -398,7 +401,7 @@ void arch_unmask_fp_traps(ucontext_t *uc)
     return;
   }
 
-  f.val |= BOGUS_ENABLE_MASK;
+  f.val |= ENABLE_MASK;
 
   if (set_fpcsr(uc,&f)) {
     ERROR("failed to set fpcsr from context\n");
