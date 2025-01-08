@@ -57,64 +57,65 @@
   Note that THERE ARE NO TRAPS IN THE DEFAULT SETUP
   TRAPS ARE A FEATURE ADDED BY PRESCIENCE LAB TO SPECIFIC RISC-V BUILDS
 
-  Unclear how vector extensions fit into this.  
+  The new custom CSR 0x880 enables traps for the associated bits in fflags.
 
+  Unclear how vector extensions fit into this.  
 */
 
 static uint64_t get_fcsr_machine(void)
 {
   uint64_t fcsr;
-  uint64_t BOGUS_magic;
+  uint64_t ften;
   __asm__ __volatile__ ("frcsr %0" : "=r"(fcsr) : :);
-  BOGUS_magic = 0x0 ; // get our magic trap state
-  return (BOGUS_magic<<32) | (fcsr & 0xffffffffUL);
+  __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
+  return (ften<<32) | (fcsr & 0xffffffffUL);
 }
 
 static void set_fcsr_machine(uint64_t f)
 {
   uint64_t fcsr = f & 0xffffffffUL;
-  uint64_t __attribute__((unused)) BOGUS_magic = f >> 32;
+  uint64_t ften = f >> 32;
   // technically this will also modify the register, writing
   // the old value to it, so better safe than sorry
   __asm__ __volatile__ ("fscsr %0" : : "r"(fcsr));
-  // set our magic trap state here
+  __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(ften));
 }
 
 
 
 // Which traps to enable - default all
 // bits 0..4 in upper half of fake csr are all 1
-static uint64_t BOGUS_enable_base = 0x1f00000000UL; 
+static uint64_t ften_base = 0x1f00000000UL; 
 
-#define BOGUS_FLAG_MASK     (BOGUS_enable_base>>32)
-#define BOGUS_ENABLE_MASK   BOGUS_enable_base
+#define BOGUS_FLAG_MASK     (ften_base>>32)
+#define BOGUS_ENABLE_MASK   ften_base
 
 // clearing the mask => enable all
 void arch_clear_trap_mask(void)
 {
-  BOGUS_enable_base = 0x1f00000000;
+  ften_base = 0x1f00000000;
 }
 
 void arch_set_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
-    BOGUS_enable_base &= ~(0x1000000000UL);   // bit 4 upper half
+    ften_base &= ~(0x1000000000UL);   // bit 4 upper half
     break;
   case FE_DENORM:  // PAD BOGUS DO NOT HAVE ON RISC-V
-    BOGUS_enable_base &= ~(0x0UL);   // BOGUS DO NOTHING
+    ften_base &= ~(0x0UL);   // BOGUS DO NOTHING
     break;
   case FE_DIVBYZERO:
-    BOGUS_enable_base &= ~(0x0800000000UL);   // bit 3 upper half
+    ften_base &= ~(0x0800000000UL);   // bit 3 upper half
     break;
   case FE_OVERFLOW:
-    BOGUS_enable_base &= ~(0x0400000000UL);   // bit 2 upper half
+    ften_base &= ~(0x0400000000UL);   // bit 2 upper half
     break;
   case FE_UNDERFLOW:
-    BOGUS_enable_base &= ~(0x0200000000UL);   // bit 1 upper half
+    ften_base &= ~(0x0200000000UL);   // bit 1 upper half
     break;
   case FE_INEXACT:
-    BOGUS_enable_base &= ~(0x0100000000UL);   // bit 0 upper half
+    ften_base &= ~(0x0100000000UL);   // bit 0 upper half
     break;
   }
 }
@@ -123,22 +124,22 @@ void arch_reset_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
-    BOGUS_enable_base |= (0x1000000000UL);   // bit 4 upper half
+    ften_base |= (0x1000000000UL);   // bit 4 upper half
     break;
   case FE_DENORM:  // PAD BOGUS DO NOT HAVE ON RISC-V
-    BOGUS_enable_base |= (0x0UL);   // BOGUS DO NOTHING
+    ften_base |= (0x0UL);   // BOGUS DO NOTHING
     break;
   case FE_DIVBYZERO:
-    BOGUS_enable_base |= (0x0800000000UL);   // bit 3 upper half
+    ften_base |= (0x0800000000UL);   // bit 3 upper half
     break;
   case FE_OVERFLOW:
-    BOGUS_enable_base |= (0x0400000000UL);   // bit 2 upper half
+    ften_base |= (0x0400000000UL);   // bit 2 upper half
     break;
   case FE_UNDERFLOW:
-    BOGUS_enable_base |= (0x0200000000UL);   // bit 1 upper half
+    ften_base |= (0x0200000000UL);   // bit 1 upper half
     break;
   case FE_INEXACT:
-    BOGUS_enable_base |= (0x0100000000UL);   // bit 0 upper half
+    ften_base |= (0x0100000000UL);   // bit 0 upper half
     break;
   }
 }
