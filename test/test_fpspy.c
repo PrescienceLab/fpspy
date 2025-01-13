@@ -19,16 +19,17 @@
 #include <pthread.h>
 #define __GNU_SOURCE
 #include <fenv.h>
+#include <util.h>
 
 #define NUM_THREADS 1
 
 // does show up in unistd for some reason...
 int execvpe(char *, char **, char **); 
-
+/*
 double foo(double x)
 {
   return sin(x);
-} 
+} */
 
 void use(double x);
 
@@ -39,7 +40,7 @@ void divzero()
   
   x=99.0;
   y=0.0;
-  printf("Doing divide by zero\n");
+  //printf("Doing divide by zero\n");
   z = x/y;
   use(z);
   //printf("%.18le / %.18le = %.18le\n", x,y,z);
@@ -51,7 +52,7 @@ void nanny()
   
   x=0.0;
   y=0.0;
-  printf("Doing NAN\n");
+  //printf("Doing NAN\n");
   z = x/y;
   use(z);
   //printf("%.18le / %.18le = %.18le\n", x,y,z);
@@ -68,7 +69,7 @@ void denorm()
   val =  0x000fffffffffffffULL;
   x=*(double*)&val;
   y=4.0;
-  printf("Doing denorm\n");
+  //printf("Doing denorm\n");
   z = x/y;
   use(z);
   //printf("%.18le / %.18le = %.18le\n", x,y,z);
@@ -84,7 +85,7 @@ void underflow()
   val =  0x0010000000000001ULL;
   x=*(double*)&val;
   y=x;
-  printf("Doing underflow\n");
+  //printf("Doing underflow\n");
   z = x*y;
   use(z);
   //printf("%.18le / %.18le = %.18le\n", x,y,z);
@@ -100,7 +101,7 @@ void overflow()
   val =  0x7fefffffffffffffULL;
   x=*(double*)&val;
   y=4.0;
-  printf("Doing overflow\n");
+  //printf("Doing overflow\n");
   z = x*y;
   use(z);
   //  printf("%.18le * %.18le = %.18le\n", x,y,z);
@@ -120,7 +121,7 @@ void inexact()
   // all 0s except for bit 52..0 
   val =  0x001fffffffffffffULL;
   y=*(double*)&val;
-  printf("Doing inexact\n");
+  //printf("Doing inexact\n");
   z = x-y;
   use(z);
   //printf("%.18le - %.18le = %.18le\n", x,y,z);
@@ -145,7 +146,7 @@ int do_work()
 
   // if we abort here, we should have some partial output in the logs
   
-  if (getenv("TEST_FPSPY_BREAK_GENERAL_SIGNAL")) {
+  /*if (getenv("TEST_FPSPY_BREAK_GENERAL_SIGNAL")) {
     signal(SIGUSR1,handler);
   }
   if (getenv("TEST_FPSPY_BREAK_FPE_SIGNAL")) {
@@ -153,7 +154,7 @@ int do_work()
   }
   if (getenv("TEST_FPSPY_BREAK_FE_FUNC")) {
     feclearexcept(FE_ALL_EXCEPT);
-  }
+  }*/
 
   underflow();
   overflow();
@@ -173,7 +174,10 @@ void *thread_start(void *tid)
 
 int main(int argc, char *argv[], char *envp[])
 {
-  int pid;
+  
+  write_csr(0x880, ~0);
+
+  /*int pid;
   pthread_t tid[NUM_THREADS];
   int rc;
   int am_child = argc>1 && !strcasecmp(argv[1],"child");
@@ -245,9 +249,11 @@ int main(int argc, char *argv[], char *envp[])
   for (i=0;i<NUM_THREADS;i++) {
     pthread_join(tid[i],0);
     printf("Joined thread %d\n", i);
-  }
+  }*/
 
-  printf("Goodbye from test_fpspy\n");
+  do_work();
+
+  // printf("Goodbye from test_fpspy\n");
   return 0;
 }
   
