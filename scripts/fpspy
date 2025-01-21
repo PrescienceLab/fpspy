@@ -1,0 +1,89 @@
+#!/usr/bin/perl -w
+
+use Getopt::Long;
+
+defined($ENV{FPSPY_DIR}) or die "Please set FPSPY_DIR\n";
+defined($ENV{FPSPY_ARCH}) or die "Please set FPSPY_ARCH (x64, arm64, riscv64)\n";
+
+$dir = $ENV{FPSPY_DIR};
+$arch = $ENV{FPSPY_ARCH};
+
+$lib = $dir."/bin/".$arch."/fpspy.so";
+
+(-e $lib) or die "$lib does not exist - did you build it?\n";
+
+# base config:
+$aggregate=0;
+$individual=0; # force user to choose mode
+$kernel=0;
+$nonaggressive=0;  # aggressive by default
+$nothreads=0; # threads by default
+$maxcount=-1; # unlimited output in individual mode
+
+
+&GetOptions(
+    'aggregate' => \$aggregate,
+    'individual' => \$individual,
+    'kernel' => \$kernel,
+    'nonaggressive' => \$nonaggressive,
+    'nothreads' => \$nothreads,
+    'maxcount=s' => \$maxcount,
+    'help' => \$help);
+
+
+if ($#ARGV<0 || $help) {
+    print "fpspy --aggregate|--individual\n";
+    print "      [--kernel] [--nonaggressive]\n";
+    print "      [--nothreads] [--maxcount=d+]\n";
+    print "      [--help] command\n\n";
+    print "defaults:  no kernel, aggressive,\n";
+    print "           threads, unlimited count\n\n";
+    print "FPSpy can be configured in a range of\n";
+    print "other ways using environment variables.\n";
+    print "Please see the README for a description.\n\n";
+    print "For aggregate mode, the fpemon output file\n";
+    print "is human-readable\n\n";
+    print "For individual mode, the fpemon output file\n";
+    print "is in binary form.  Use the parse_individual.pl\n";
+    print "script to translate to human readable, or use\n";
+    print "the analyze_individual.pl script to analyze it.\n";
+    exit 0;
+}
+
+$env = "LD_PRELOAD=$lib ";
+
+if ($aggregate && !$individual) {
+    $env.="FPSPY_MODE=aggregate ";
+} elsif (!$aggregate && $individual) {
+    $env.="FPSPY_MODE=individual ";
+} else {
+    print "you must choose a mode, either --aggregate or --individual\n";
+    exit 0;
+}
+
+if ($kernel) {
+    $env.="FPSPY_KERNEL=yes ";
+} else {
+    $env.="FPSPY_KERNEL=no ";
+}
+
+if (!$nonaggressive) {
+    $env.="FPSPY_AGGRESSIVE=yes ";
+} else {
+    $env.="FPSPY_AGGRESSIVE=no ";
+}
+
+if ($nothreads) {
+    $env.="FPSPY_DISABLE_PTHREADS=yes ";
+} else {
+    $env.="FPSPY_DISABLE_PTHEADS=no ";
+}
+
+$env.="FPSPY_MAXCOUNT=$maxcount ";
+
+$cmd = $env.join(" ",@ARGV);
+
+#print "executing \"$cmd\"\n";
+
+system($cmd);
+
