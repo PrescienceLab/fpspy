@@ -1180,6 +1180,10 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   fp_trap_handler(si,uc);
 
   DEBUG("SIGFPE done\n");
+
+  // copy back our limited gregset_t
+  
+
 }
 
 //
@@ -1213,6 +1217,27 @@ static inline void fxrstor(const struct _libc_fpstate *fpvm_fpregs)
 // note that unlike FPVM, the handler WILL NOT and MUST NOT
 // change any state except for possibly changing
 // rflags.TF and mxcsr.trap bits
+//
+// See src/x64/user_fpspy_entry.S for a layout of
+// the stack and what priv points to on entry.  The summary is
+// that priv is pointing to the following, which is on the stack
+//  Note that r8 through rflags is in gregset_t order
+//
+//  rsp + 144  [pad]    <= alignment pad
+//  rsp + 136  rflags   ^
+//             rip      |
+//             rsp      |  like gregset
+//             rcx      |
+//             ...      |
+//  rsp + 0    r8       v  
+//
+// the handler will create a fake ucontext_t from this
+// and a snapshot of FP state.  The user should assume
+// the only parts of that ucontext_t to be trusted are
+// the signal state, the above gregset_t subset, and
+// the mxcsr in the fprs.
+//
+//
 void fpspy_short_circuit_handler(void *priv)
 {
   // Build up a sufficiently detailed ucontext_t and
@@ -1225,6 +1250,7 @@ void fpspy_short_circuit_handler(void *priv)
   uint32_t old;
   
   // capture FP state (note that this eventually needs to do xsave)
+  // no code we call can safely deal with the fpregs beyond SSE
   fxsave(&fpregs);
 
   old = get_mxcsr();
@@ -1246,10 +1272,13 @@ void fpspy_short_circuit_handler(void *priv)
 
   fake_ucontext.uc_mcontext.fpregs = &fpregs;
 
-  // consider memcpy
-  for (int i = 0; i < 18; i++) {
-    fake_ucontext.uc_mcontext.gregs[i] = *((greg_t*)priv + i);
+#if 1
+  memcpy(fake_ucontext.uc_mcontext.gregs,priv,8*(REG_EFL-REG_R8+1));
+#else
+  for (int i = REG_R8; i <= REG_EFL; i++) {
+      fake_ucontext.uc_mcontext.gregs[i] = ((greg_t*)priv)[i];
   }
+#endif
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
  
@@ -1285,13 +1314,21 @@ void fpspy_short_circuit_handler(void *priv)
   
   fp_trap_handler(si,uc);
 
+  DEBUG("SCFPE  done\n");
+
+
+#if 1
+  memcpy(priv,fake_ucontext.uc_mcontext.gregs,8*(REG_EFL-REG_R8+1));
+#else
+  for (int i = REG_R8; i <= REG_EFL; i++) {
+      ((greg_t*)priv)[i] = fake_ucontext.uc_mcontext.gregs[i];
+  }
+#endif
   
   // restore FP state (note that this eventually needs to do xsave)
   // really, the only thing that should change is mxcsr, so this is
   // doing too much work
   fxrstor(&fpregs);
-
-  DEBUG("SCFPE  done\n");
 
   return;
 }
