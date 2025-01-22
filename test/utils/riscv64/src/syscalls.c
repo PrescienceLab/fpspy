@@ -65,6 +65,11 @@ uintptr_t __attribute__((weak)) handle_trap(uintptr_t cause, uintptr_t epc, uint
 {
     if (is_trap_interrupt(cause)) {
         tohost_exit(2022);
+    } else if (cause == 0x18) {
+        char *message = "FLOATING POINT EXCEPTION\n";
+        syscall(SYS_write, 1, (uintptr_t)message, strnlen(message, 26));
+        write_csr(0x880, 0);
+        return epc;
     } else {
         // The trap was an exception
         tohost_exit(1337);
