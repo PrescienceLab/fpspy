@@ -30,7 +30,7 @@ LDFLAGS = -lc -lgcc -static -Wall -fno-strict-aliasing -D$(ARCH) \
 BIN = ../bin
 BUILD = ./build
 
-all: $(BIN)/$(ARCH)/test_fpspy $(BIN)/$(ARCH)/test_fpspy_rounding $(BIN)/$(ARCH)/sleepy $(BIN)/$(ARCH)/dopey
+all: $(BIN)/$(ARCH)/test_fpspy 
 
 $(BUILD)/syscalls.o: utils/$(ARCH)/src/syscalls.c
 	$(CC) $(CFLAGS) -c -o $@ $^
