@@ -15,6 +15,8 @@
 extern volatile uint64_t tohost;
 extern volatile uint64_t fromhost;
 
+void printstr(const char* s);
+
 static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t arg2)
 {
   volatile uint64_t magic_mem[8] __attribute__((aligned(64)));
@@ -59,17 +61,21 @@ void __attribute__((noreturn)) tohost_exit(uintptr_t code)
   while (1);
 }
 
-static inline int is_trap_interrupt(uint64_t mcause) { return mcause >> 63; }
+static inline int is_trap_interrupt(uint64_t cause) { return cause >> 63; }
+
+static inline int floating_point_exception(uint64_t cause) { return (cause & 0x7FFFFFFF) == 0x18; }
 
 uintptr_t __attribute__((weak)) handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32])
 {
     if (is_trap_interrupt(cause)) {
         tohost_exit(2022);
-    } else if (cause == 0x18) {
-        char *message = "FLOATING POINT EXCEPTION\n";
-        syscall(SYS_write, 1, (uintptr_t)message, strnlen(message, 26));
-        write_csr(0x880, 0);
-        return epc;
+    }
+
+    // exception cause is 63 lower bits.
+    uint64_t exception_cause = cause & 0x7FFFFFFF;
+
+    if (floating_point_exception(cause)) {
+        tohost_exit(43);
     } else {
         // The trap was an exception
         tohost_exit(1337);
@@ -97,7 +103,7 @@ void __attribute__((weak)) thread_entry(int cid, int nc)
   // for the case of single-threaded programs, only let core 0 proceed.
   while (cid != 0);
 }
-
+//
 int __attribute__((weak)) main(int argc, char** argv)
 {
   // single-threaded programs override this function.
@@ -153,7 +159,7 @@ void _init(int cid, int nc)
   char* pbuf = buf;
   for (int i = 0; i < NUM_COUNTERS; i++)
     if (counters[i])
-      pbuf += sprintf(pbuf, "%s = %d\n", counter_names[i], counters[i]);
+      pbuf += sprintf(pbuf, "%s = %ld\n", counter_names[i], counters[i]);
   if (pbuf != buf)
     printstr(buf);
 
