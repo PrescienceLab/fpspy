@@ -106,9 +106,15 @@ _start:
 1:
 #endif
 
-  # initialize trap vector
+  # initialize trap vectors
+  # With the current method of hacking in "U-mode delegation", the processor
+  # delegates to S-mode, but we hack in a change where ONLY a set of CSRs that
+  # we need to jump back to U-mode are changed. This means that unless the
+  # design is significantly reworked to add proper U-mode delegation CSRs, we
+  # must set both mtvec and stvec!
   la t0, trap_entry
   csrw mtvec, t0
+  csrw stvec, t0
 
 #define ROCC_INTERRUPT_BIT 0x2000
   # Enable RoCC interrupts
@@ -148,11 +154,96 @@ _start:
   sll a2, a0, STKSHIFT
   add tp, tp, a2
 
+  .align 2
+  # Set M Previous Privilege to User, so mret goes back to user.
+  # Reset bits 12:11 to 00
+#define MSTATUS_MPP_U 0xFFFFFFFFFFFFE7FF
+  csrr t0, mstatus
+  li t1, MSTATUS_MPP_U
+  and t0, t0, t1
+  csrw mstatus, t0
+
+  # Delegate the illegal instruction exception
+#define FLOATING_POINT_XCPT 0x1000000
+  li t0, FLOATING_POINT_XCPT
+  csrw medeleg, t0
+  # Do not delegate interrupts
+  li t0, 0
+  csrw mideleg, t0
+
+  /* Set up Pipelined Interrupts */
+  li t0, FLOATING_POINT_XCPT
+  csrw sedeleg, t0
+  csrr t1, sedeleg
+  csrw sideleg, zero
+
+  /* NOTE: Set pipelined interrupt target in starget CSR */
+  la t0, user_deleg_xcpt_handler
+  csrw 0x5c0, t0
+  csrr t1, 0x5c0
+
+  /* Set Rocket's UIE to 1 so make Pipelined Interrupts behave right.
+   * NOTE: This is a SUPER MASSIVE hack right now! */
+  csrr t0, mstatus
+  ori t0, t0, MSTATUS_UIE
+  csrw mstatus, t0
+
+  // We expect to jump to handle_trap and exit.
+  // jal handle_trap // Should make us exit.
+
+  # Set up Physical Memory Protection, letting the user have access to the entire
+  # physical address space.
+  li t0, 0x3fffffffffffff
+  csrw pmpaddr0, t0
+  li t0, 0xf
+  csrw pmpcfg0, t0
+
+  # Clear mcause before we do anything, so we see exceptions exactly as they
+  # happen.
+  csrw mcause, zero
+  
+  # go to main on the mret
+  la t0, _init
+  csrw mepc, t0
+  
+
+  # mret to User-level, using the value in mepc to set the PC where the CPU should
+  # begin executing after the switch.
+  # Nothing directly after the mret will execute!
+  mret
+
+
+  .align 2
+
+/* Create a user-level illegal instruction exception handler. All this will do
+ * is clobber a register we do not use and return. The point of this test is to
+ * test the URET instruction. */
+  .align 2
+user_deleg_xcpt_handler:
+  li a6, 0x1234567898765432
+
+  /* Read the UEPC register so we can skip the failing FP instruction */
+  csrr t0, 0x841
+
+  /* FP instructions are 4 bytes */
+  addi t0, t0, 4
+  csrw 0x841, t0
+
+  uret
+// END user_deleg_xcpt_handler
+
+init_entry:
   j _init
+// END init_entry
 
   .align 2
 trap_entry:
   addi sp, sp, -272
+
+  # Use an M-mode-only instruction to see if we are actually in U-mode after our
+  # delegation hack.
+  # Chose t0 register because we already used it as a garbage register.
+  csrr t0, marchid
 
   SREG x1, 1*REGBYTES(sp)
   SREG x2, 2*REGBYTES(sp)
