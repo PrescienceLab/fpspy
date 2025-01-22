@@ -1214,6 +1214,8 @@ static inline void fxrstor(const struct _libc_fpstate *fpvm_fpregs)
 }
 
 
+#define USE_MEMCPY 1
+
 // note that unlike FPVM, the handler WILL NOT and MUST NOT
 // change any state except for possibly changing
 // rflags.TF and mxcsr.trap bits
@@ -1272,7 +1274,7 @@ void fpspy_short_circuit_handler(void *priv)
 
   fake_ucontext.uc_mcontext.fpregs = &fpregs;
 
-#if 1
+#if USE_MEMCPY
   memcpy(fake_ucontext.uc_mcontext.gregs,priv,8*(REG_EFL-REG_R8+1));
 #else
   for (int i = REG_R8; i <= REG_EFL; i++) {
@@ -1317,7 +1319,7 @@ void fpspy_short_circuit_handler(void *priv)
   DEBUG("SCFPE  done\n");
 
 
-#if 1
+#if USE_MEMCPY
   memcpy(priv,fake_ucontext.uc_mcontext.gregs,8*(REG_EFL-REG_R8+1));
 #else
   for (int i = REG_R8; i <= REG_EFL; i++) {
