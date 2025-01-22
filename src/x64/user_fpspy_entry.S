@@ -12,7 +12,6 @@
 
   We will construct a partial gregset_t from this, for registers r8..rflags and then a temp:
 
-  rsp + 144  [pad]    <= alignment pad
   rsp + 136  rflags   ^
              rip      |
              rsp      |  like gregset
@@ -26,10 +25,9 @@
 */	
 .global _user_fpspy_entry
 _user_fpspy_entry:
-	pushq $0       	        // pad (may not be needed)
 	pushf                   // rflags of faulting instruction
-	pushq 24(%rsp)          // rip of faulting instruction
-	pushq 24(%rsp)          // rsp of faulting instruction
+	pushq 16(%rsp)          // rip of faulting instruction
+	pushq 16(%rsp)          // rsp of faulting instruction
 
 	pushq %rcx
 	pushq %rax
@@ -73,7 +71,6 @@ return_from_handler:
 
 stack now looks like:
 
- rsp +24  [pad]    
  rsp +16  rflags   
  rsp + 8  rip      
  rsp + 0  rsp       
