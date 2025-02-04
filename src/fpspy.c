@@ -1223,6 +1223,95 @@ void init_pipelined_exceptions(void) {
   close(fd);
 }
 
+
+#define USE_MEMCPY 1
+
+
+// note that unlike FPVM, the handler WILL NOT and MUST NOT
+// change any state except for possibly changing
+// rflags.TF and mxcsr.trap bits
+//
+// See src/riscv64/user_fpspy_entry.S for a layout of
+// the stack and what priv points to on entry.  The summary is
+// that priv is pointing to all of the int registers that have
+// been saved on the stack on entry into the handler.
+void fpspy_short_circuit_handler(void *priv)
+{
+  // Build up a sufficiently detailed ucontext_t and
+  // call the shared handler.  Copy in/out the FP and GP
+  // state 
+  
+  siginfo_t fake_siginfo = {0};     
+  ucontext_t fake_ucontext;
+  arch_fp_csr_t old_fcsr;
+  
+  arch_get_machine_fp_csr(&old_fcsr);
+  uint64_t fcsr = old_fcsr.val & 0xffffffffUL;
+
+  uint32_t err = fcsr & 0x1f;
+  if (err == 0x10) {	/* Invalid op (NaN)*/
+    fake_siginfo.si_code = FPE_FLTINV;
+  } else if (err == 0x08) { /* Divide by Zero */
+    fake_siginfo.si_code = FPE_FLTDIV;
+  } else if (err == 0x05) { /* Overflow */
+    fake_siginfo.si_code = FPE_FLTOVF;
+  } else if (err == 0x03) { /* Underflow */
+    fake_siginfo.si_code = FPE_FLTUND;
+  } else if (err == 0x01) { /* Precision */
+    fake_siginfo.si_code = FPE_FLTRES;
+  }
+  
+  siginfo_t *si = (siginfo_t *)&fake_siginfo;
+
+#if USE_MEMCPY
+  memcpy(fake_ucontext.uc_mcontext.__gregs, priv, NGREG * sizeof(fake_ucontext.uc_mcontext.__gregs[0]));
+#else
+  for (int i = REG_PC; i < REG_PC + NGREG; i++) {
+      fake_ucontext.uc_mcontext.__gregs[i] = ((greg_t*)priv)[i];
+  }
+#endif
+
+  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
+
+  ucontext_t *uc = (ucontext_t *)&fake_ucontext;
+ 
+  uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
+
+  DEBUG(
+	"SCFPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x %02x "
+	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+	si->si_signo, si->si_errno, si->si_code, si->si_addr, pc[0], pc[1], pc[2], pc[3], pc[4],
+	pc[5], pc[6], pc[7], pc[8], pc[9], pc[10], pc[11], pc[12], pc[13], pc[14], pc[15]);
+  DEBUG("SCFPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
+  
+  if (log_level > 1) {
+    char buf[80];
+
+    switch (si->si_code) {
+      case FPE_FLTDIV : strcpy(buf, "FPE_FLTDIV"); break;
+      case FPE_FLTINV : strcpy(buf, "FPE_FLTINV"); break;
+      case FPE_FLTOVF : strcpy(buf, "FPE_FLTOVF"); break;
+      case FPE_FLTUND : strcpy(buf, "FPE_FLTUND"); break;
+      case FPE_FLTRES : strcpy(buf, "FPE_FLTRES"); break;
+      case FPE_FLTSUB : strcpy(buf, "FPE_FLTSUB"); break;
+      case FPE_INTDIV : strcpy(buf, "FPE_INTDIV"); break;
+      case FPE_INTOVF : strcpy(buf, "FPE_INTOVF"); break;
+    default:
+      sprintf(buf, "UNKNOWN(0x%x)\n",si->si_code);
+      break;
+    }
+
+    DEBUG("FPE exceptions %s\n", buf);
+
+  }
+  
+  fp_trap_handler(si,uc);
+
+  DEBUG("SCFPE  done\n");
+
+  return;
+}
+
 // this is where the pipelined exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
 uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
