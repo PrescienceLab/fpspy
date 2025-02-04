@@ -9,99 +9,85 @@
 #ARCH=x64
 #ARCH=arm64
 ARCH=riscv64
-ENVIRONMENT=firesim
 
-# hard coded assuming we are doing cross-compilation
-ifeq ($(ARCH),riscv64)
-	ifeq ($(ENVIRONMENT),verilator)
-  		PREFIX=riscv64-unknown-elf-
-		CFLAGS = -D__riscv_xlen=64 -mcmodel=medany 
-		LDFLAGS = -DPREALLOCATE=1 -fno-common -fno-builtin-printf \
-					-fvisibility=hidden -nostartfiles -Tutils/$(ARCH)/link.ld
-	else
-		PREFIX=riscv64-unknown-linux-gnu-
-	endif
-else
-  PREFIX=
-endif
+LINUX_PREFIX=riscv64-unknown-linux-gnu-
+LINUX_CFLAGS=
+LINUX_LDFLAGS=
+LINUX_CC=$(LINUX_PREFIX)gcc
+LINUX_LD=$(LINUX_PREFIX)ld
+LINUX_AR=$(LINUX_PREFIX)ar
 
-CC = $(PREFIX)gcc
-LD = $(PREFIX)ld
-AR = $(PREFIX)ar
+METAL_PREFIX=riscv64-unknown-elf-
+METAL_CFLAGS=-D__riscv_xlen=64 -mcmodel=medany 
+METAL_LDFLAGS=-DPREALLOCATE=1 -fno-common -fno-builtin-printf \
+					    -fvisibility=hidden -nostartfiles -Tutils/$(ARCH)/link.ld
+METAL_CC=$(METAL_PREFIX)gcc
+METAL_LD=$(METAL_PREFIX)ld
+METAL_AR=$(METAL_PREFIX)ar
 
-CFLAGS += -O0 -Wall -fno-strict-aliasing -g -D$(ARCH) -Iutils/$(ARCH)/include/
-LDFLAGS += -lc -lgcc -static -Wall -fno-strict-aliasing -D$(ARCH) -std=gnu99
+CFLAGS = -O0 -Wall -fno-strict-aliasing -g -D$(ARCH) -Iutils/$(ARCH)/include/
+LDFLAGS = -lc -lgcc -static -Wall -fno-strict-aliasing -D$(ARCH) -std=gnu99
 
 BIN = ../bin
 BUILD = ./build
 
-INCLUDES = utils/$(ARCH)/include/util.h utils/$(ARCH)/include/encoding.h  
+INCLUDES = utils/riscv64/include/util.h utils/riscv64/include/util2.h utils/riscv64/include/encoding.h  
 
-all: $(BIN)/$(ARCH)/fs_pipelined_full_nanny $(BIN)/$(ARCH)/fs_pipelined_just_nanny \
-     $(BIN)/$(ARCH)/fs_pipelined_no_nanny 
- 
+TESTS = full_nanny just_nanny no_nanny
 
-$(BUILD)/syscalls.o: utils/$(ARCH)/src/syscalls.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+CONFIGS = firesim firesim_pipelined verilator
 
-$(BUILD)/crt.o: utils/$(ARCH)/src/crt.S $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+VERILATOR_DEPS = $(BUILD)/verilator_crt.o $(BUILD)/verilator_syscalls.o
+FIRESIM_DEPS = 
+FIRESIM_PIPELINED_DEPS = $(BUILD)/firesim_pipelined_trap_entry.o
 
-$(BUILD)/test_fpspy.o: test_fpspy.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+all: verilator_tests firesim_tests firesim_pipelined_tests
 
-$(BUILD)/full_nanny.o: full_nanny.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+verilator_tests: $(addprefix $(BIN)/riscv64/verilator_, $(TESTS))
+firesim_tests: $(addprefix $(BIN)/riscv64/firesim_, $(TESTS))
+firesim_pipelined_tests: $(addprefix $(BIN)/riscv64/firesim_pipelined_, $(TESTS))
 
-$(BUILD)/just_nanny.o: just_nanny.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+################################################################################
 
-$(BUILD)/no_nanny.o: no_nanny.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(BUILD)/verilator_%.o: utils/riscv64/src/%.S $(INCLUDES)
+	$(METAL_CC) $(CFLAGS) $(METAL_CFLAGS) -c -o $@ $<
 
-$(BUILD)/sleepy.o: sleepy.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(BUILD)/verilator_%.o: utils/riscv64/src/%.c $(INCLUDES)
+	$(METAL_CC) $(CFLAGS) $(METAL_CFLAGS) -c -o $@ $<
 
-$(BUILD)/dopey.o: dopey.c $(INCLUDES)
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(BUILD)/verilator_%.o: %.c $(INCLUDES)
+	$(METAL_CC) $(CFLAGS) $(METAL_CFLAGS) -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_test_fpspy: $(BUILD)/test_fpspy.o $(BUILD)/crt.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_%.o: utils/riscv64/src/%.S $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_sleepy: $(BUILD)/sleepy.o $(BUILD)/crt.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_%.o: utils/riscv64/src/%.c $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_dopey: $(BUILD)/dopey.o $(BUILD)/crt.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_%.o: %.c $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_full_nanny: $(BUILD)/full_nanny.o $(BUILD)/crt.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_pipelined_%.o: utils/riscv64/src/%.S $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -DDELEGATE_TRAPS -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_just_nanny: $(BUILD)/just_nanny.o $(BUILD)/crt.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_pipelined_%.o: utils/riscv64/src/%.c $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -DDELEGATE_TRAPS -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_pipelined_no_nanny: $(BUILD)/no_nanny.o $(BUILD)/crt.o 
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BUILD)/firesim_pipelined_%.o: %.c $(INCLUDES)
+	$(LINUX_CC) $(CFLAGS) $(LINUX_CFLAGS) -DDELEGATE_TRAPS -c -o $@ $<
 
-$(BIN)/$(ARCH)/ve_test_fpspy: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/test_fpspy.o
-	$(CC) $(LDFLAGS) -o $@ $^
+################################################################################
 
-$(BIN)/$(ARCH)/ve_sleepy: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/sleepy.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BIN)/riscv64/verilator_%: $(BUILD)/verilator_%.o $(VERILATOR_DEPS)
+	$(METAL_CC) $(LDFLAGS) $(METAL_LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/ve_dopey: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/dopey.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BIN)/riscv64/firesim_pipelined_%: $(BUILD)/firesim_pipelined_%.o $(FIRESIM_PIPELINED_DEPS)
+	$(LINUX_CC) $(LDFLAGS) $(LINUX_LDFLAGS) -DDELEGATE_TRAPS -o $@ $^
 
-$(BIN)/$(ARCH)/ve_full_nanny: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/full_nanny.o
-	$(CC) $(LDFLAGS) -o $@ $^
-
-$(BIN)/$(ARCH)/ve_just_nanny: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/just_nanny.o
-	$(CC) $(LDFLAGS) -o $@ $^
-
-$(BIN)/$(ARCH)/ve_no_nanny: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/no_nanny.o
-	$(CC) $(LDFLAGS) -o $@ $^
+$(BIN)/riscv64/firesim_%: $(BUILD)/firesim_%.o $(FIRESIM_DEPS)
+	$(LINUX_CC) $(LDFLAGS) $(LINUX_LDFLAGS) -o $@ $^
 
 clean:
-	rm -rf $(BUILD) && mkdir $(BUILD) 
+	rm -rf $(BUILD) && mkdir -p $(BUILD)/utils 
 	rm -f $(BIN)/$(ARCH)/*
 
