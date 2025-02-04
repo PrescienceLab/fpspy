@@ -175,7 +175,7 @@ void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
   set_fcsr_machine(FCSR_OURS);
 }
 
-int      arch_have_special_fp_csr_exception(int which)
+int arch_have_special_fp_csr_exception(int which)
 {
   // RISC-V does not have denorm...
   return 0;
@@ -362,52 +362,33 @@ void arch_clear_fp_exceptions(ucontext_t *uc)
 {
   arch_fp_csr_t f;
 
-  if (get_fpcsr(uc,&f)) {
-    ERROR("failed to get fpcsr from context\n");
-    return;
-  }
+  arch_get_machine_fp_csr(&f);
 
   f.val &= ~FLAG_MASK;
 
-  if (set_fpcsr(uc,&f)) {
-    ERROR("failed to set fpcsr from context\n");
-    return;
-  }
+  arch_set_machine_fp_csr(&f);
 }
 
 void arch_mask_fp_traps(ucontext_t *uc)
 {
   arch_fp_csr_t f;
 
-  if (get_fpcsr(uc,&f)) {
-    ERROR("failed to get fpcsr from context\n");
-    return;
-  }
+  arch_get_machine_fp_csr(&f);
 
   f.val &= ~ENABLE_MASK;
 
-  if (set_fpcsr(uc,&f)) {
-    ERROR("failed to set fpcsr from context\n");
-    return;
-  }
+  arch_set_machine_fp_csr(&f);
 }
 
 void arch_unmask_fp_traps(ucontext_t *uc)
 {
   arch_fp_csr_t f;
 
-  if (get_fpcsr(uc,&f)) {
-    ERROR("failed to get fpcsr from context\n");
-    return;
-  }
+  arch_get_machine_fp_csr(&f);
 
   f.val |= ENABLE_MASK;
 
-  if (set_fpcsr(uc,&f)) {
-    ERROR("failed to set fpcsr from context\n");
-    return;
-  }
-
+  arch_set_machine_fp_csr(&f);
 }  
 
 #define FCSR_ROUND_MASK (0x70UL)
@@ -545,7 +526,6 @@ int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size)
     return 4;
   }
 }
-
 
 // representation is as the FCSR from the architecture
 // with "our" extensions added to the front
