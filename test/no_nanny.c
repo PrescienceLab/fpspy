@@ -8,7 +8,10 @@
 
 */
 
+#ifdef DELEGATE_TRAPS
 #include <util.h>
+#endif
+#include <encoding.h>
 #define __GNU_SOURCE
 
 void use(double x);
@@ -25,7 +28,9 @@ void nanny() {
 void use(double x) {}
 
 int main(int argc, char *argv[], char *envp[]) {
+  #ifdef DELEGATE_TRAPS
   enable_delegation();
+  #endif
   write_csr(0x880, 0x1f);
 
   return 0;

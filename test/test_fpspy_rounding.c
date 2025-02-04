@@ -95,6 +95,12 @@ static uint32_t get_fpsr()
   __asm__ __volatile__ ("mrs %0, fpsr" : "=r"(v) : : "memory");
   return v;
 #endif
+
+#ifdef riscv64
+  uint64_t v;
+  __asm__ __volatile__ ("frcsr %0" : "=r"(v) : : "memory");
+  return v;
+#endif
 }
 
 
