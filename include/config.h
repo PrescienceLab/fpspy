@@ -18,4 +18,5 @@
 #endif
 
 // have our magical RISC-V FP Traps?
-#define CONFIG_RISCV_HAVE_FP_TRAPS 0
+#define CONFIG_RISCV_HAVE_FP_TRAPS 1
+#define CONFIG_TRAP_PIPELINED_EXCEPTIONS 1

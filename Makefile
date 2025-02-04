@@ -6,9 +6,9 @@
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-ARCH=x64
+#ARCH=x64
 #ARCH=arm64
-#ARCH=riscv64
+ARCH=riscv64
 
 # hard coded assuming we are doing cross-compilation
 ifeq ($(ARCH),riscv64)
