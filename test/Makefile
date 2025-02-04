@@ -9,7 +9,7 @@
 #ARCH=x64
 #ARCH=arm64
 ARCH=riscv64
-ENVIRONMENT=verilator
+ENVIRONMENT=firesim
 
 # hard coded assuming we are doing cross-compilation
 ifeq ($(ARCH),riscv64)
@@ -35,49 +35,52 @@ LDFLAGS += -lc -lgcc -static -Wall -fno-strict-aliasing -D$(ARCH) -std=gnu99
 BIN = ../bin
 BUILD = ./build
 
-all: $(BIN)/$(ARCH)/ve_test_fpspy $(BIN)/$(ARCH)/ve_full_nanny \
-	$(BIN)/$(ARCH)/ve_just_nanny $(BIN)/$(ARCH)/ve_no_nanny
+INCLUDES = utils/$(ARCH)/include/util.h utils/$(ARCH)/include/encoding.h  
 
-$(BUILD)/syscalls.o: utils/$(ARCH)/src/syscalls.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+all: $(BIN)/$(ARCH)/fs_pipelined_full_nanny $(BIN)/$(ARCH)/fs_pipelined_just_nanny \
+     $(BIN)/$(ARCH)/fs_pipelined_no_nanny 
+ 
 
-$(BUILD)/crt.o: utils/$(ARCH)/src/crt.S
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/syscalls.o: utils/$(ARCH)/src/syscalls.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/test_fpspy.o: test_fpspy.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/crt.o: utils/$(ARCH)/src/crt.S $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/full_nanny.o: full_nanny.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/test_fpspy.o: test_fpspy.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/just_nanny.o: just_nanny.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/full_nanny.o: full_nanny.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/no_nanny.o: no_nanny.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/just_nanny.o: just_nanny.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/sleepy.o: sleepy.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/no_nanny.o: no_nanny.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/dopey.o: dopey.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+$(BUILD)/sleepy.o: sleepy.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BIN)/$(ARCH)/fs_test_fpspy: $(BUILD)/test_fpspy.o
+$(BUILD)/dopey.o: dopey.c $(INCLUDES)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BIN)/$(ARCH)/fs_pipelined_test_fpspy: $(BUILD)/test_fpspy.o $(BUILD)/crt.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/fs_sleepy: $(BUILD)/sleepy.o
+$(BIN)/$(ARCH)/fs_pipelined_sleepy: $(BUILD)/sleepy.o $(BUILD)/crt.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/fs_dopey: $(BUILD)/dopey.o
+$(BIN)/$(ARCH)/fs_pipelined_dopey: $(BUILD)/dopey.o $(BUILD)/crt.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/fs_full_nanny: $(BUILD)/full_nanny.o
+$(BIN)/$(ARCH)/fs_pipelined_full_nanny: $(BUILD)/full_nanny.o $(BUILD)/crt.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/fs_just_nanny: $(BUILD)/just_nanny.o
+$(BIN)/$(ARCH)/fs_pipelined_just_nanny: $(BUILD)/just_nanny.o $(BUILD)/crt.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-$(BIN)/$(ARCH)/fs_no_nanny: $(BUILD)/no_nanny.o
+$(BIN)/$(ARCH)/fs_pipelined_no_nanny: $(BUILD)/no_nanny.o $(BUILD)/crt.o 
 	$(CC) $(LDFLAGS) -o $@ $^
 
 $(BIN)/$(ARCH)/ve_test_fpspy: $(BUILD)/syscalls.o $(BUILD)/crt.o $(BUILD)/test_fpspy.o

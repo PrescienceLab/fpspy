@@ -13,27 +13,24 @@
 
 void use(double x);
 
+void nanny() {
+  volatile double x, y, z;
 
-void nanny()
-{
-  volatile double x,y,z;
-  
-  x=0.0;
-  y=0.0;
-  z = x/y;
+  x = 0.0;
+  y = 0.0;
+  z = x / y;
   use(z);
 }
 
 void use(double x) {}
 
-int main(int argc, char *argv[], char *envp[])
-{
+int main(int argc, char *argv[], char *envp[]) {
+
+  enable_delegation();
+
   write_csr(0x880, 0x1f);
 
   nanny();
 
   return 0;
 }
-  
-
-
