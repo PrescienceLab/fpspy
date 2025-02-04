@@ -91,6 +91,18 @@
 #include "fpvm_ioctl.h"
 #endif
 
+#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#include <fcntl.h>
+#include <stdint.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#define PIPELINED_DELEGATE_HELLO_WORLD 0x4630
+#define PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET 0x80084631
+#define PIPELINED_DELEGATE_DELEGATE_TRAPS 0x80084632
+#define PIPELINED_DELEGATE_CSR_STATUS 0x4633
+#define PIPELINED_DELEGATE_FILE "/dev/pipelined-delegate"
+#endif
+
 //
 // per-process state
 //
@@ -1122,7 +1134,7 @@ static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
     }
   }
   
-      
+
   if (mc->state == AWAIT_FPE) {
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
@@ -1185,6 +1197,40 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
   
 
 }
+
+//
+// Entry point for FP Trap with pipelined exceptions on RISC-V
+//
+#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+// this is currently completely riscv64-specific
+
+extern void trap_entry(void);
+
+struct delegate_config_t {
+  unsigned int en_flag;
+  unsigned long trap_mask;
+};
+
+void init_pipelined_exceptions(void) {
+  int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
+  struct delegate_config_t config = {
+      .en_flag = 1,
+      .trap_mask = 1 << 0x18,
+  };
+
+  ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
+  ioctl(fd, PIPELINED_DELEGATE_DELEGATE_TRAPS, &config);
+  close(fd);
+}
+
+// this is where the pipelined exception will land, and we will dispatch
+// to the fpspy_short_circuit_handler
+uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
+  fpspy_short_circuit_handler((void *)regs);
+  return epc;
+}
+#endif
+
 
 //
 // Entry point for FP Trap for trap short circuiting (kernel module)
@@ -1430,6 +1476,10 @@ static int bringup_monitoring_context(int tid)
       DEBUG("thread kernel setup successful\n");
     }
   }
+#endif
+
+#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+  init_pipelined_exceptions();
 #endif
   
   c->start_time = arch_cycle_count();
