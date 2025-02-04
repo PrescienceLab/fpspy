@@ -51,7 +51,8 @@ trap_entry:
   csrr a0, ucause
   csrr a1, uepc
   mv a2, sp
-  jal handle_trap
+  la s3, handle_trap
+  jalr s3
   csrw uepc, a0
 
   LREG x1, 1*REGBYTES(sp)
