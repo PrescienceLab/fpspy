@@ -302,12 +302,21 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc)
 }
  
  
+#if CONFIG_RISCV_USE_ESTEP
+// When using PPE, we can place a new "estep" instruction
+// which will cause a trap that is delivered via PPE
+// this instruction is 32 bits.
+#define BRK_INSTR 0x00300073
+#else
+// In regular operation, we will place an instruction
+// that produces a standard trap which is delivered
+// to us using SIGTRAP.  This is the ebreak instruction.
 // the break instruction is 16 bits:  0x9002 - ebreak
 // we will place two of these in a row
 // there is no real reason for this other than wanting
 // to just reuse the arm64 logic without changes
 #define BRK_INSTR 0x90029002
-
+#endif
 
 #define ENCODE(p,inst,data) (*(uint64_t*)(p)) = ((((uint64_t)(inst))<<32)|((uint32_t)(data)))
 #define DECODE(p,inst,data) (inst) = (uint32_t)((*(uint64_t*)(p))>>32); (data) = (uint32_t)((*(uint64_t*)(p)));
