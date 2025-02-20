@@ -1002,26 +1002,17 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
   DEBUG("Timer reinitialized for %lu us state %s\n",n,s->state==ON ? "ON" : "off");
 }
 
-
-//
-// FPSpy gets a SIGTRAP when the current instruction follows a FP
-// instruction for which we took a SIGFPE.  This is AWAIT_TRAP state.
-// The default use of the SIGTRAP is to tranistion to AWAIT_FPE state.
+// Shared handling of a breakpoint trap, which occurs on the
+// instruction immediately after one that had a floating point trap
+// A breakpoint trap might be intiated by a SIGTRAP or other mechanisms,
+// see below.
+// The default use of a breakpoint trap is to transition to AWAIT_FPE state.
 // Other circumstances require an abort or are part of an abort,
-// except for when we catch SIGTRAP in INIT state, in which case,
+// except for when we catch a breakpoint trap  in INIT state, in which case,
 // this is deferred startup for the thread
-//
-static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
+static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
-  ucontext_t *uc = (ucontext_t *)priv;
-  
-  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x ip %p\n",
-        si->si_signo, si->si_errno, si->si_code, si->si_addr);
-  DEBUG("TRAP ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
-        (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
-	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
-  
 
   if (!mc || mc->state==ABORT) { 
     arch_clear_fp_exceptions(uc);
@@ -1032,7 +1023,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     arch_reset_trap(uc,mc ? &mc->trap_state : 0 );   // best effort disable of trap
     if (!mc) {
       // this may end badly
-      abort_operation("Cannot find monitoring context during sigtrap_handler exec");
+      abort_operation("Cannot find monitoring context during brk_trap_handler exec");
     } else {
       DEBUG("FP and TRAP mcontext restored on abort\n");
     }
@@ -1087,6 +1078,26 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
     mc->aborting_in_trap = 1;
     abort_operation("Surprise state during sigtrap_handler exec");
   }
+}
+  
+//
+// FPSpy gets a SIGTRAP when the current instruction follows a FP
+// instruction for which we took a SIGFPE.  
+//
+static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
+{
+  ucontext_t *uc = (ucontext_t *)priv;
+
+  
+  DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x ip %p\n",
+        si->si_signo, si->si_errno, si->si_code, si->si_addr);
+  DEBUG("TRAP ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
+        (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
+	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
+  
+  brk_trap_handler(si,uc);
+
+ 
 
   DEBUG("TRAP done\n");
 }
