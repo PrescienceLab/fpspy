@@ -323,9 +323,10 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc)
  
 void arch_set_trap(ucontext_t *uc, uint64_t *state)
 {
-  // we assume that all relevant instructions are 4 bytes
-  // otherwise this will end badly
-  uint32_t *target = (uint32_t*)(uc->uc_mcontext.__gregs[REG_PC] + 4); 
+  // Figure out how long this instruction was so we can move our trap target on
+  // the proper next instruction.
+  uint32_t inst_width = (uc->uc_mcontext.__gregs[REG_PC] & 3) ? 4 : 2;
+  uint32_t *target = (uint32_t*)(uc->uc_mcontext.__gregs[REG_PC] + inst_width);
 
   if (state) {
     uint32_t old = *target;
