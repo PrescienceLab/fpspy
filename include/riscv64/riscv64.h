@@ -1,6 +1,9 @@
 #ifndef __RISCV64
 #define __RISCV64
 
+#define EXC_FLOATING_POINT   0x18
+#define EXC_INSTRUCTION_STEP 0x19
+
 typedef union  {
   uint64_t val; 
   struct {
