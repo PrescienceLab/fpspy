@@ -1267,7 +1267,7 @@ void init_pipelined_exceptions(void) {
   int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
   struct delegate_config_t config = {
       .en_flag = 1,
-      .trap_mask = 1 << 0x18,
+      .trap_mask = (1 << 0x18) | (1 << 0x19),
   };
 
   ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
