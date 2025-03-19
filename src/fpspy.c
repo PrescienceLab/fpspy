@@ -1327,7 +1327,18 @@ void fpspy_short_circuit_handler(void *priv)
 // this is where the pipelined exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
 uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
-  fpspy_short_circuit_handler((void *)regs);
+  /* We do NOT modify the return PC for the the two pipelined exceptions we
+   * handle in FPSpy. So both branches can return void and we just return the
+   * xEPC we were given. */
+  void *real_gregs = (void *)regs;
+  switch (cause) {
+  case EXC_FLOATING_POINT:
+    fpspy_short_circuit_handler(real_gregs);
+    break;
+  default:
+    abort_operation("Received unexpected trap cause!");
+    break;
+  }
   return epc;
 }
 #endif
