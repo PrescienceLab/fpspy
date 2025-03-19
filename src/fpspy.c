@@ -1227,7 +1227,7 @@ void init_pipelined_exceptions(void) {
   int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
   struct delegate_config_t config = {
       .en_flag = 1,
-      .trap_mask = 1 << 0x18,
+      .trap_mask = (1 << 0x18) | (1 << 0x19),
   };
 
   ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
@@ -1324,6 +1324,61 @@ void fpspy_short_circuit_handler(void *priv)
   return;
 }
 
+/* ESTEPs are a pipeline-able exception cause that has been added to RISC-V for
+ * the express purpose of being delegable. In theory, breakpoints could be
+ * pipeline delegated too, but that would interfere with traditional dbugging
+ * tools, like GDB or Valgrind. In an effort to make things behave like people
+ * would expect, we introduced ESTEP, which is IDENTICAL to EBREAK, except for
+ * the fact that no external software (GDB) will issue an ESTEP instruction. */
+
+/* Like the PPE FPE handler above, we construct a fake siginfo_t and ucontext_t
+ * structs so that the arch-independent code works seamlessly.
+ * When handling an ESTEP, this was intended to REPLACE the instruction
+ * immediately AFTER the FP instruction. So we need to clean up and return the
+ * original instruction, along with returning a set of FP flags that make sense
+ * for the instruction we just executed. */
+void handle_estep(void *real_gregs) {
+  siginfo_t fake_siginfo = {0};
+  ucontext_t fake_ucontext;
+  arch_fp_csr_t old_fcsr;
+
+  arch_get_machine_fp_csr(&old_fcsr);
+  uint64_t fcsr = old_fcsr.val & 0xffffffffUL;
+
+  uint32_t err = fcsr & 0x1f;
+  if (err == 0x10) {	/* Invalid op (NaN)*/
+    fake_siginfo.si_code = FPE_FLTINV;
+  } else if (err == 0x08) { /* Divide by Zero */
+    fake_siginfo.si_code = FPE_FLTDIV;
+  } else if (err == 0x05) { /* Overflow */
+    fake_siginfo.si_code = FPE_FLTOVF;
+  } else if (err == 0x03) { /* Underflow */
+    fake_siginfo.si_code = FPE_FLTUND;
+  } else if (err == 0x01) { /* Precision */
+    fake_siginfo.si_code = FPE_FLTRES;
+  }
+
+  siginfo_t *si = (siginfo_t *)&fake_siginfo;
+
+#if USE_MEMCPY
+  memcpy(fake_ucontext.uc_mcontext.__gregs, real_gregs,
+         NGREG * sizeof(fake_ucontext.uc_mcontext.__gregs[0]));
+#else
+  for (int i = REG_PC; i < REG_PC + NGREG; i++) {
+    fake_ucontext.uc_mcontext.__gregs[i] = ((greg_t*)real_gregs)[i];
+  }
+#endif
+
+  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
+
+  ucontext_t *uc = (ucontext_t *)&fake_ucontext;
+  /* uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC]; */
+
+  brk_trap_handler(si, uc);
+
+  DEBUG("PPE ESTEP done\n");
+}
+
 // this is where the pipelined exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
 uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
@@ -1334,6 +1389,9 @@ uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
   switch (cause) {
   case EXC_FLOATING_POINT:
     fpspy_short_circuit_handler(real_gregs);
+    break;
+  case EXC_INSTRUCTION_STEP:
+    handle_estep(real_gregs);
     break;
   default:
     abort_operation("Received unexpected trap cause!");
