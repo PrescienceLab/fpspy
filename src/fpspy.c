@@ -96,6 +96,7 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include "riscv64.h"
 #define PIPELINED_DELEGATE_HELLO_WORLD 0x4630
 #define PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET 0x80084631
 #define PIPELINED_DELEGATE_DELEGATE_TRAPS 0x80084632
