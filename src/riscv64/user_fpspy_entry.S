@@ -48,12 +48,12 @@ trap_entry:
   SREG x30, 30*REGBYTES(sp)
   SREG x31, 31*REGBYTES(sp)
 
-  csrr a0, ucause
-  csrr a1, uepc
+  csrr a0, 0x842 // ucause
+  csrr a1, 0x841 // uepc
   mv a2, sp
   la s3, handle_trap
   jalr s3
-  csrw uepc, a0
+  csrw 0x841, a0
 
   LREG x1, 1*REGBYTES(sp)
   LREG x2, 2*REGBYTES(sp)
