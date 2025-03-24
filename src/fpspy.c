@@ -1274,7 +1274,7 @@ void init_pipelined_exceptions(void) {
       .trap_mask = (1 << 0x18) | (1 << 0x19),
   };
 
-  DEBUG("Installing %s (0x%016x) as pipelined delegation handler\n",
+  DEBUG("Installing %s (0x%016lx) as pipelined delegation handler\n",
         "trap_entry", (uintptr_t) trap_entry);
 
   ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
@@ -1294,13 +1294,13 @@ void init_pipelined_exceptions(void) {
 // the stack and what priv points to on entry.  The summary is
 // that priv is pointing to all of the int registers that have
 // been saved on the stack on entry into the handler.
-void fpspy_short_circuit_handler(void *priv)
+static void ppe_fpe_handler(void *priv)
 {
   // Build up a sufficiently detailed ucontext_t and
   // call the shared handler.  Copy in/out the FP and GP
   // state
-  DEBUG("%s (0x%016x): PPE Handling FPE! Building fake siginfo & ucontext\n",
-        __func__, (uintptr_t)fpspy_short_circuit_handler);
+  DEBUG("%s (0x%016lx): PPE Handling FPE! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t)ppe_fpe_handler);
 
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext;
@@ -1339,11 +1339,11 @@ void fpspy_short_circuit_handler(void *priv)
   uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
 
   DEBUG(
-	"SCFPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x %02x "
+	"PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x %02x "
 	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
 	si->si_signo, si->si_errno, si->si_code, si->si_addr, pc[0], pc[1], pc[2], pc[3], pc[4],
 	pc[5], pc[6], pc[7], pc[8], pc[9], pc[10], pc[11], pc[12], pc[13], pc[14], pc[15]);
-  DEBUG("SCFPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
+  DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
   
   if (log_level > 1) {
     char buf[80];
@@ -1368,7 +1368,7 @@ void fpspy_short_circuit_handler(void *priv)
   
   fp_trap_handler(si,uc);
 
-  DEBUG("SCFPE  done\n");
+  DEBUG("PPE-FPE  done\n");
 
   return;
 }
@@ -1386,9 +1386,9 @@ void fpspy_short_circuit_handler(void *priv)
  * immediately AFTER the FP instruction. So we need to clean up and return the
  * original instruction, along with returning a set of FP flags that make sense
  * for the instruction we just executed. */
-void handle_estep(void *real_gregs) {
-  DEBUG("%s (0x%016x): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
-        __func__, (uintptr_t) handle_estep);
+static void ppe_estep_handler(void *real_gregs) {
+  DEBUG("%s (0x%016lx): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t) ppe_estep_handler);
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext;
   arch_fp_csr_t old_fcsr;
@@ -1432,19 +1432,19 @@ void handle_estep(void *real_gregs) {
 
 // this is where the pipelined exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
-uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
+uintptr_t handle_ppe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
   /* We do NOT modify the return PC for the the two pipelined exceptions we
    * handle in FPSpy. So both branches can return void and we just return the
    * xEPC we were given. */
-  DEBUG("%s (0x%016x): Handling pipelined trap\n",
-        __func__, (uintptr_t) handle_trap);
+  DEBUG("%s (0x%016lx): Handling pipelined trap\n",
+        __func__, (uintptr_t) handle_ppe);
   void *real_gregs = (void *)regs;
   switch (cause) {
   case EXC_FLOATING_POINT:
-    fpspy_short_circuit_handler(real_gregs);
+    ppe_fpe_handler(real_gregs);
     break;
   case EXC_INSTRUCTION_STEP:
-    handle_estep(real_gregs);
+    ppe_estep_handler(real_gregs);
     break;
   default:
     abort_operation("Received unexpected trap cause!");
