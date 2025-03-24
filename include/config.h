@@ -21,3 +21,6 @@
 #define CONFIG_RISCV_HAVE_FP_TRAPS 1
 #define CONFIG_TRAP_PIPELINED_EXCEPTIONS 1
 #define CONFIG_RISCV_USE_ESTEP     1
+
+// intercept our own sigsegv/sigbus
+#define CONFIG_INTERCEPT_MEMORY_FAULTS 1

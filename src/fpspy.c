@@ -78,6 +78,8 @@
 
 #include <math.h>
 
+#include <execinfo.h>
+
 #include "config.h"
 #include "debug.h"
 #include "arch.h"
@@ -1210,6 +1212,44 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
 
 }
 
+
+#if CONFIG_INTERCEPT_MEMORY_FAULTS
+//
+// Allow our own interception for memory faults
+// sigsegv/sigbus to facilate debugging in environments
+// where gdb cannot be easily used.
+//
+
+
+static void memfault_handler(int sig, siginfo_t *si, void *priv)
+{
+  ucontext_t *uc = (ucontext_t *)priv;
+  void *ip = (void*)arch_get_ip(uc);
+  void *sp = (void*)arch_get_sp(uc);
+  void *addr = si->si_addr;
+
+  DEBUG("%s ip=%p sp=%p addr=%p reason: %d (%s)\n",
+	sig==SIGSEGV ? "SIGSEGV" : sig==SIGBUS ? "SIGBUS" : "UNKNOWN SIGNAL",
+	ip,sp,addr,si->si_code,
+	si->si_code==SEGV_MAPERR ? "MAPERR" : si->si_code==SEGV_ACCERR ? "PERM" : "UNKNOWN"); 
+
+  // note that the following will likely be useless since we're looking at
+  // the signal stack, not the application stack
+  int  count=64;
+  void *addrs[count];
+
+  count = backtrace(addrs, count);
+  if (count>0) {
+    backtrace_symbols_fd(addrs,count,STDERR_FILENO);
+  } else {
+    ERROR("cannot generate backtrace\n");
+  }
+
+  abort();
+}
+
+#endif
+
 //
 // Entry point for FP Trap with pipelined exceptions on RISC-V
 //
@@ -1703,6 +1743,20 @@ static int bringup()
   }
   
   ORIG_IF_CAN(feclearexcept,exceptmask);
+
+#if CONFIG_INTERCEPT_MEMORY_FAULTS
+  struct sigaction memsa;
+  memset(&memsa,0,sizeof(memsa));
+  memsa.sa_sigaction = memfault_handler;
+  memsa.sa_flags |= SA_SIGINFO;
+  sigemptyset(&memsa.sa_mask);
+  // old handlers not captured here since we
+  // will abort in any case.   This option should
+  // not be included for production, only debugging
+  ORIG_IF_CAN(sigaction,SIGSEGV,&memsa,0);
+  ORIG_IF_CAN(sigaction,SIGBUS,&memsa,0);
+#endif
+
 
   if (mode==INDIVIDUAL) {
 
