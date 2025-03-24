@@ -1306,7 +1306,8 @@ void init_pipelined_exceptions(void) {
 // the stack and what priv points to on entry.  The summary is
 // that priv is pointing to all of the int registers that have
 // been saved on the stack on entry into the handler.
-static void ppe_fpe_handler(void *priv)
+// return value is the PC of next instruction
+static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
 {
   // Build up a sufficiently detailed ucontext_t and
   // call the shared handler.  Copy in/out the FP and GP
@@ -1382,7 +1383,7 @@ static void ppe_fpe_handler(void *priv)
 
   DEBUG("PPE-FPE  done\n");
 
-  return;
+  return epc;
 }
 
 /* ESTEPs are a pipeline-able exception cause that has been added to RISC-V for
@@ -1398,7 +1399,7 @@ static void ppe_fpe_handler(void *priv)
  * immediately AFTER the FP instruction. So we need to clean up and return the
  * original instruction, along with returning a set of FP flags that make sense
  * for the instruction we just executed. */
-static void ppe_estep_handler(void *real_gregs) {
+static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
   DEBUG("%s (0x%016lx): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
         __func__, (uintptr_t) ppe_estep_handler);
   siginfo_t fake_siginfo = {0};
@@ -1437,9 +1438,14 @@ static void ppe_estep_handler(void *real_gregs) {
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
   /* uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC]; */
 
+  monitoring_context_t *mc = find_monitoring_context(gettid());
+  int skip_estep = mc && mc->state==INIT;
+
   brk_trap_handler(si, uc);
 
   DEBUG("PPE ESTEP done\n");
+
+  return skip_estep ? epc + 4 : epc;
 }
 
 // this is where the pipelined exception will land, and we will dispatch
@@ -1453,10 +1459,10 @@ uintptr_t handle_ppe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
   void *real_gregs = (void *)regs;
   switch (cause) {
   case EXC_FLOATING_POINT:
-    ppe_fpe_handler(real_gregs);
+    epc = ppe_fpe_handler(real_gregs, epc);
     break;
   case EXC_INSTRUCTION_STEP:
-    ppe_estep_handler(real_gregs);
+    epc = ppe_estep_handler(real_gregs, epc);
     break;
   default:
     abort_operation("Received unexpected trap cause!");
@@ -1872,7 +1878,14 @@ static int bringup()
     } else {
       // now kick ourselves to set the sse bits; we are currently in state INIT
       // this will also do the architecture init for the thread
+#if CONFIG_RISCV_USE_ESTEP
+      __asm__ __volatile__ (".byte 0x00\n"
+			    ".byte 0x30\n"
+			    ".byte 0x00\n"
+			    ".byte 0x73\n");
+#else
       kill(getpid(),SIGTRAP);
+#endif
     }
     
   } else {
