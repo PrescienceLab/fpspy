@@ -1016,6 +1016,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
   if (!mc || mc->state==ABORT) { 
+      DEBUG("We reached something that should never happen in brk_trap_handler\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
     if (control_round_config) {
@@ -1032,6 +1033,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
   }
   
   if (mc && mc->state==INIT) {
+      DEBUG("We only expect to hit this brk_trap_handler thing once!\n");
     if (arch_thread_init(uc)) {
       // bad news, probably... 
       abort_operation("failed to setup thread for architecture\n");
@@ -1049,6 +1051,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
   }
   
   if (mc->state == AWAIT_TRAP) { 
+    DEBUG("COMMON case for brk_trap_handler");
     mc->count++;
     arch_clear_fp_exceptions(uc);         
     if (maxcount!=-1 && mc->count >= maxcount) { 
@@ -1070,6 +1073,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
 	update_sampler(mc,uc);
     }
   } else {
+      DEBUG("This should never happen! Not awaiting TRAP when we expected one!\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
     if (control_round_config) {
@@ -1230,6 +1234,9 @@ void init_pipelined_exceptions(void) {
       .trap_mask = (1 << 0x18) | (1 << 0x19),
   };
 
+  DEBUG("Installing %s (0x%016x) as pipelined delegation handler\n",
+        "trap_entry", (uintptr_t) trap_entry);
+
   ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
   ioctl(fd, PIPELINED_DELEGATE_DELEGATE_TRAPS, &config);
   close(fd);
@@ -1251,9 +1258,11 @@ void fpspy_short_circuit_handler(void *priv)
 {
   // Build up a sufficiently detailed ucontext_t and
   // call the shared handler.  Copy in/out the FP and GP
-  // state 
-  
-  siginfo_t fake_siginfo = {0};     
+  // state
+  DEBUG("%s (0x%016x): PPE Handling FPE! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t)fpspy_short_circuit_handler);
+
+  siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext;
   arch_fp_csr_t old_fcsr;
   
@@ -1338,6 +1347,8 @@ void fpspy_short_circuit_handler(void *priv)
  * original instruction, along with returning a set of FP flags that make sense
  * for the instruction we just executed. */
 void handle_estep(void *real_gregs) {
+  DEBUG("%s (0x%016x): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t) handle_estep);
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext;
   arch_fp_csr_t old_fcsr;
@@ -1385,6 +1396,8 @@ uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
   /* We do NOT modify the return PC for the the two pipelined exceptions we
    * handle in FPSpy. So both branches can return void and we just return the
    * xEPC we were given. */
+  DEBUG("%s (0x%016x): Handling pipelined trap\n",
+        __func__, (uintptr_t) handle_trap);
   void *real_gregs = (void *)regs;
   switch (cause) {
   case EXC_FLOATING_POINT:
@@ -1907,7 +1920,8 @@ static __attribute__((constructor)) void fpspy_init(void)
 {
 
   INFO("init\n");
-  if (!inited) { 
+  DEBUG("%s is located at 0x%016lx\n", __func__, (uintptr_t) fpspy_init);
+  if (!inited) {
     if (getenv("FPSPY_LOG_LEVEL")) {
       char* nptr = getenv("FPSPY_LOG_LEVEL");
       char* endptr = NULL;

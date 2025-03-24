@@ -21,16 +21,16 @@ CC = $(PREFIX)gcc
 LD = $(PREFIX)ld
 AR = $(PREFIX)ar
 
-CFLAGS_FPSPY = -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/$(ARCH) -D$(ARCH)
+CFLAGS_FPSPY = -g -O2 -Wall -fno-strict-aliasing -fPIC -shared -Iinclude -Iinclude/$(ARCH) -D$(ARCH)
 LDFLAGS_FPSPY =  -lm -ldl
 
-CFLAGS_TOOL = -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/$(ARCH)
+CFLAGS_TOOL = -g -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/$(ARCH)
 LDFLAGS_TOOL =  -lm
 
-CFLAGS_TEST = -O2 -Wall -fno-strict-aliasing -pthread -D$(ARCH)
+CFLAGS_TEST = -g -O2 -Wall -fno-strict-aliasing -pthread -D$(ARCH)
 LDFLAGS_TEST =  -lm 
 
-CFLAGS_ROUNDING = -O0 -Wall -D$(ARCH)
+CFLAGS_ROUNDING = -g -O0 -Wall -D$(ARCH)
 LDFLAGS_ROUNDING =  -lm
 
 
