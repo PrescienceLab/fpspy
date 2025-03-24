@@ -447,6 +447,17 @@ static int writeall(int fd, void *buf, int len)
   return 0;
 }
 
+static void kick_self(void)
+{
+#if CONFIG_RISCV_USE_ESTEP
+      __asm__ __volatile__ (".byte 0x00\n"
+			    ".byte 0x30\n"
+			    ".byte 0x00\n"
+			    ".byte 0x73\n");
+#else
+      kill(getpid(),SIGTRAP);
+#endif
+}
 
 static __attribute__((constructor)) void fpspy_init(void);
 
@@ -494,7 +505,7 @@ static void abort_operation(char *reason)
       // and we are a trap, the mcontext has already been restored
       if (!mc || !mc->aborting_in_trap) {
 	// signal ourselves to restore the FP and TRAP state in the context
-	kill(gettid(),SIGTRAP);
+	kick_self();
       }
     }
 
@@ -563,7 +574,7 @@ int fork()
 	
 	// note that kickstart only applies to "top-level" process
 	// not this child
-	kill(gettid(),SIGTRAP);
+	kick_self();
 	// we should now be in the right state
       }
       
@@ -625,7 +636,7 @@ static void *trampoline(void *p)
       // we should have inherited all the sighandlers, etc, from the spawning thread
       
       // now kick ourselves to set the sse bits; we are currently in state INIT
-      kill(gettid(),SIGTRAP);
+      kick_self();
       // we should now be in the right state
       // the architecure init is done in the trap handler
     }
@@ -1352,10 +1363,8 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
 
   DEBUG(
-	"PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x %02x "
-	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-	si->si_signo, si->si_errno, si->si_code, si->si_addr, pc[0], pc[1], pc[2], pc[3], pc[4],
-	pc[5], pc[6], pc[7], pc[8], pc[9], pc[10], pc[11], pc[12], pc[13], pc[14], pc[15]);
+	"PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x\n",
+	si->si_signo, si->si_errno, si->si_code, si->si_addr, pc[0], pc[1], pc[2], pc[3]);
   DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
   
   if (log_level > 1) {
@@ -1878,14 +1887,6 @@ static int bringup()
     } else {
       // now kick ourselves to set the sse bits; we are currently in state INIT
       // this will also do the architecture init for the thread
-#if CONFIG_RISCV_USE_ESTEP
-      __asm__ __volatile__ (".byte 0x00\n"
-			    ".byte 0x30\n"
-			    ".byte 0x00\n"
-			    ".byte 0x73\n");
-#else
-      kill(getpid(),SIGTRAP);
-#endif
     }
     
   } else {
