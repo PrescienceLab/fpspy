@@ -1237,6 +1237,18 @@ static void memfault_handler(int sig, siginfo_t *si, void *priv)
 	ip,sp,addr,si->si_code,
 	si->si_code==SEGV_MAPERR ? "MAPERR" : si->si_code==SEGV_ACCERR ? "PERM" : "UNKNOWN"); 
 
+  Dl_info dli;
+  if (dladdr(ip,&dli)) {
+    DEBUG("fname=%s fbase=%p sname=%s saddr=%p\n",
+	  dli.dli_fname ? dli.dli_fname : "UNKNOWN",
+	  dli.dli_fbase,
+	  dli.dli_sname ? dli.dli_sname : "UNKNOWN",
+	  dli.dli_saddr);
+  } else {
+    DEBUG("cannot resolve function\n");
+  }
+
+  
   // note that the following will likely be useless since we're looking at
   // the signal stack, not the application stack
   int  count=64;
@@ -1768,6 +1780,8 @@ static int bringup()
   // not be included for production, only debugging
   ORIG_IF_CAN(sigaction,SIGSEGV,&memsa,0);
   ORIG_IF_CAN(sigaction,SIGBUS,&memsa,0);
+
+  //  *(int*)0=0;
 #endif
 
 
