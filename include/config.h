@@ -9,7 +9,7 @@
 
 
 // support for FPVM kernel module
-#define CONFIG_TRAP_SHORT_CIRCUITING 1
+#define CONFIG_TRAP_SHORT_CIRCUITING 0
 
 #if !defined(x64) && CONFIG_TRAP_SHORT_CIRCUITING
 #warning Disabling short circuiting as it is not available on this architecture
