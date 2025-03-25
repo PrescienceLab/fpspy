@@ -320,25 +320,37 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc)
 
 #define ENCODE(p,inst,data) (*(uint64_t*)(p)) = ((((uint64_t)(inst))<<32)|((uint32_t)(data)))
 #define DECODE(p,inst,data) (inst) = (uint32_t)((*(uint64_t*)(p))>>32); (data) = (uint32_t)((*(uint64_t*)(p)));
- 
+
+static inline uint64_t insn_len(uintptr_t pc) {
+    uint32_t inst = *(uint32_t*)pc;
+    return (inst & 3) ? 4 : 2;
+}
+
 void arch_set_trap(ucontext_t *uc, uint64_t *state)
 {
+  DEBUG("%s (0x%016lx): mcontext PC: 0x%016lx\n",
+        __func__, (uintptr_t)arch_set_trap,
+        uc->uc_mcontext.__gregs[REG_PC]);
   // Figure out how long this instruction was so we can move our trap target on
   // the proper next instruction.
-  uint32_t inst_width = (uc->uc_mcontext.__gregs[REG_PC] & 3) ? 4 : 2;
-  uint32_t *target = (uint32_t*)(uc->uc_mcontext.__gregs[REG_PC] + inst_width);
+  uint64_t fp_pc = uc->uc_mcontext.__gregs[REG_PC];
+  uint32_t fp_inst_width = insn_len(fp_pc);
+  uint32_t *next_inst = (uint32_t*)(fp_pc + fp_inst_width);
 
   if (state) {
-    uint32_t old = *target;
-    ENCODE(state,*target,2);  // "2"=> we are stashing the old instruction
-    *target = BRK_INSTR;
-    __builtin___clear_cache(target,((void*)target)+4);
-    DEBUG("breakpoint instruction (%08x) inserted at %p overwriting %08x (state %016lx)\n",*target, target,old,*state);
+    uint32_t orig_next_inst = *next_inst;
+    ENCODE(state, orig_next_inst, 2); // "2" => Stash original next inst
+    *next_inst = BRK_INSTR;
+    /* NOTE: Even if the target instruction (the instruction AFTER the one we
+     * patched a breakpoint onto) is a compressed instruction, clearing the full
+     * 4 bytes is not a real problem. */
+    __builtin___clear_cache(next_inst, ((void*)next_inst) + 4);
+    DEBUG("breakpoint instruction (%08x) inserted at %p overwriting %08x (state %016lx)\n",*next_inst, next_inst,orig_next_inst,*state);
   } else {
     ERROR("no state on set trap - just ignoring\n");
-  } 
+  }
 }
-  
+
 void arch_reset_trap(ucontext_t *uc, uint64_t *state)
 {
   uint32_t *target = (uint32_t*)(uc->uc_mcontext.__gregs[REG_PC]);
