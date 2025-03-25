@@ -1884,6 +1884,7 @@ static int bringup()
     } else {
       // now kick ourselves to set the sse bits; we are currently in state INIT
       // this will also do the architecture init for the thread
+      kick_self();
     }
     
   } else {
