@@ -450,10 +450,7 @@ static int writeall(int fd, void *buf, int len)
 static void kick_self(void)
 {
 #if CONFIG_RISCV_USE_ESTEP
-      __asm__ __volatile__ (".byte 0x00\n"
-			    ".byte 0x30\n"
-			    ".byte 0x00\n"
-			    ".byte 0x73\n");
+      __asm__ __volatile__ (".insn 0x00300073\n\t");
 #else
       kill(getpid(),SIGTRAP);
 #endif
