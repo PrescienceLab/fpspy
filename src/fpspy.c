@@ -1360,8 +1360,8 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
 
   DEBUG(
-	"PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p %02x %02x %02x %02x\n",
-	si->si_signo, si->si_errno, si->si_code, si->si_addr, pc[0], pc[1], pc[2], pc[3]);
+  "PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n",
+  si->si_signo, si->si_errno, si->si_code, si->si_addr, *(uint32_t*)pc);
   DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
   
   if (log_level > 1) {
