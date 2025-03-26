@@ -452,7 +452,7 @@ static void kick_self(void)
 #if CONFIG_RISCV_USE_ESTEP
       __asm__ __volatile__ (".insn 0x00300073\n\t");
 #else
-      kill(getpid(),SIGTRAP);
+      kill(gettid(),SIGTRAP);
 #endif
 }
 
