@@ -1457,9 +1457,6 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
 // this is where the pipelined exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
 uintptr_t handle_ppe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
-  /* We do NOT modify the return PC for the the two pipelined exceptions we
-   * handle in FPSpy. So both branches can return void and we just return the
-   * xEPC we were given. */
   DEBUG("%s (0x%016lx): Handling pipelined trap\n",
         __func__, (uintptr_t) handle_ppe);
   void *real_gregs = (void *)regs;
