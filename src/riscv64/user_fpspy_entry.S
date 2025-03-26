@@ -54,8 +54,18 @@ trap_entry:
   SREG x30, 30*REGBYTES(sp)
   SREG x31, 31*REGBYTES(sp)
 
-  csrr a0, 0x842 // ucause
+  /* With all GREGS saved, we also need to save the PC of the instruction that
+   * faulted to the 0th index of the stack, to match up with what mcontext's
+   * gregs expect. On RISC-V GREG x0 (the zero register) is hardwired to zero,
+   * so we do not need to save it. Instead, we can stash PC there instead.
+   * FIXME: If we only use PC passed through the GREGS structure on the stack,
+   * then we MUST reload this value off the stack, instead of having handle_ppe
+   * return a new UEPC.
+   * NOTE: This UEPC value in a1 is ALSO passed through to handle_ppe now. */
   csrr a1, 0x841 // uepc
+  SREG a1, 0*REGBYTES(sp)
+
+  csrr a0, 0x842 // ucause
   mv a2, sp
   la s3, handle_ppe
   jalr s3
