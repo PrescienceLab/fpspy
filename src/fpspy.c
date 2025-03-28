@@ -1353,6 +1353,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   }
 #endif
 
+  /* XXX: We assume RISC-V D extension here! */
   fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
@@ -1387,6 +1388,10 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   
   fp_trap_handler(si,uc);
 
+  /* XXX: We assume D extension here! */
+  /* Restore the FCSR's FP event bits. */
+  riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
+
   DEBUG("PPE-FPE  done\n");
 
   return epc;
@@ -1410,23 +1415,6 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
         __func__, (uintptr_t) ppe_estep_handler);
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext;
-  arch_fp_csr_t old_fcsr;
-
-  arch_get_machine_fp_csr(&old_fcsr);
-  uint64_t fcsr = old_fcsr.val & 0xffffffffUL;
-
-  uint32_t err = fcsr & 0x1f;
-  if (err == 0x10) {	/* Invalid op (NaN)*/
-    fake_siginfo.si_code = FPE_FLTINV;
-  } else if (err == 0x08) { /* Divide by Zero */
-    fake_siginfo.si_code = FPE_FLTDIV;
-  } else if (err == 0x05) { /* Overflow */
-    fake_siginfo.si_code = FPE_FLTOVF;
-  } else if (err == 0x03) { /* Underflow */
-    fake_siginfo.si_code = FPE_FLTUND;
-  } else if (err == 0x01) { /* Precision */
-    fake_siginfo.si_code = FPE_FLTRES;
-  }
 
   siginfo_t *si = (siginfo_t *)&fake_siginfo;
 
@@ -1439,15 +1427,14 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
   }
 #endif
 
-  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
-
-  ucontext_t *uc = (ucontext_t *)&fake_ucontext;
-  /* uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC]; */
-
   monitoring_context_t *mc = find_monitoring_context(gettid());
-  int skip_estep = mc && mc->state==INIT;
 
-  brk_trap_handler(si, uc);
+  /* NOTE: skip_estep MUST come before brk_trap_handler! */
+  int skip_estep = mc && mc->state==INIT;
+  brk_trap_handler(si, &fake_ucontext);
+
+  /* Restore the FCSR's FP event bits. */
+  riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
 
   DEBUG("PPE ESTEP done\n");
 
