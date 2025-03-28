@@ -62,32 +62,40 @@
   Unclear how vector extensions fit into this.  
 */
 
-static uint64_t get_fcsr_machine(void)
+uint32_t riscv_get_fcsr(void)
 {
-  uint64_t fcsr;
-  uint64_t ften;
+  uint32_t fcsr;
   __asm__ __volatile__ ("frcsr %0" : "=r"(fcsr) : :);
-  __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
-  return (ften<<32) | (fcsr & 0xffffffffUL);
+  return fcsr;
 }
 
-static void set_fcsr_machine(uint64_t f)
+uint32_t riscv_get_fflags_mask(void)
+{
+  uint32_t ften;
+  __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
+  return ften;
+}
+
+void riscv_set_fcsr(uint32_t f)
 {
   uint64_t fcsr = f & 0xffffffffUL;
-  uint64_t ften = f >> 32;
   // technically this will also modify the register, writing
   // the old value to it, so better safe than sorry
   __asm__ __volatile__ ("fscsr %0" : : "r"(fcsr));
-  __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(ften));
+}
+
+void riscv_set_fflags_mask(uint32_t fflags_mask)
+{
+  __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(fflags_mask));
 }
 
 
 
 // Which traps to enable - default all
 // bits 0..4 in upper half of fake csr are all 1
-static uint64_t ften_base = 0x1f00000000UL; 
+static uint64_t ften_base = 0x1fUL;
 
-#define FLAG_MASK     (ften_base>>32)
+#define FLAG_MASK     ften_base
 #define ENABLE_MASK   ften_base
 
 // clearing the mask => enable all
@@ -100,22 +108,22 @@ void arch_set_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
-    ften_base &= ~(0x1000000000UL);   // bit 4 upper half
+    ften_base &= ~(0x10UL);   // bit 4 upper half
     break;
   case FE_DENORM:  // PAD BOGUS DO NOT HAVE ON RISC-V
     ften_base &= ~(0x0UL);   // BOGUS DO NOTHING
     break;
   case FE_DIVBYZERO:
-    ften_base &= ~(0x0800000000UL);   // bit 3 upper half
+    ften_base &= ~(0x08UL);   // bit 3 upper half
     break;
   case FE_OVERFLOW:
-    ften_base &= ~(0x0400000000UL);   // bit 2 upper half
+    ften_base &= ~(0x04UL);   // bit 2 upper half
     break;
   case FE_UNDERFLOW:
-    ften_base &= ~(0x0200000000UL);   // bit 1 upper half
+    ften_base &= ~(0x02UL);   // bit 1 upper half
     break;
   case FE_INEXACT:
-    ften_base &= ~(0x0100000000UL);   // bit 0 upper half
+    ften_base &= ~(0x01UL);   // bit 0 upper half
     break;
   }
 }
@@ -124,22 +132,22 @@ void arch_reset_trap_mask(int which)
 {
   switch (which) {
   case FE_INVALID:
-    ften_base |= (0x1000000000UL);   // bit 4 upper half
+    ften_base |= (0x10UL);   // bit 4 upper half
     break;
   case FE_DENORM:  // PAD BOGUS DO NOT HAVE ON RISC-V
     ften_base |= (0x0UL);   // BOGUS DO NOTHING
     break;
   case FE_DIVBYZERO:
-    ften_base |= (0x0800000000UL);   // bit 3 upper half
+    ften_base |= (0x08UL);   // bit 3 upper half
     break;
   case FE_OVERFLOW:
-    ften_base |= (0x0400000000UL);   // bit 2 upper half
+    ften_base |= (0x04UL);   // bit 2 upper half
     break;
   case FE_UNDERFLOW:
-    ften_base |= (0x0200000000UL);   // bit 1 upper half
+    ften_base |= (0x02UL);   // bit 1 upper half
     break;
   case FE_INEXACT:
-    ften_base |= (0x0100000000UL);   // bit 0 upper half
+    ften_base |= (0x01UL);   // bit 0 upper half
     break;
   }
 }
@@ -150,15 +158,19 @@ void arch_reset_trap_mask(int which)
 
 void arch_get_machine_fp_csr(arch_fp_csr_t *f)
 {
-  f->val = get_fcsr_machine();
+  uint64_t fflags_mask = riscv_get_fflags_mask();
+  f->val = (fflags_mask << 32) | riscv_get_fcsr();
 }
 
 void arch_set_machine_fp_csr(const arch_fp_csr_t *f)
 {
-  set_fcsr_machine(f->val);
+  uint32_t fcsr = (uint32_t) (f->val & 0xFFFFFFFFUL);
+  uint32_t fflags_mask = (uint32_t) (f->val >> 32);
+  riscv_set_fcsr(fcsr);
+  riscv_set_fflags_mask(fflags_mask);
 }
 
-int      arch_machine_supports_fp_traps(void)
+int arch_machine_supports_fp_traps(void)
 {
 #if CONFIG_RISCV_HAVE_FP_TRAPS
   return 1;
@@ -166,13 +178,13 @@ int      arch_machine_supports_fp_traps(void)
   return 0;
 #endif
 }
-  
 
 
+/* Do some FP compute, set up machine state to reflect that. */
 void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old)
 {
   arch_get_machine_fp_csr(old);
-  set_fcsr_machine(FCSR_OURS);
+  riscv_set_fcsr(FCSR_OURS);
 }
 
 int arch_have_special_fp_csr_exception(int which)
@@ -191,8 +203,9 @@ void arch_dump_gp_csr(const char *prefix, const ucontext_t *uc)
 {
   DEBUG("%s: [riscv has no relevant gp csr]\n", prefix);
 }
- 
- 
+
+/* What floating-point extension is the core using at the time of process init?
+ * NOTE: We chose a default case of having NO FP support. */
 static enum { HAVE_NO_FP, HAVE_F_FP, HAVE_D_FP, HAVE_Q_FP } what_fp=HAVE_NO_FP;
 
 //
@@ -212,6 +225,8 @@ static enum { HAVE_NO_FP, HAVE_F_FP, HAVE_D_FP, HAVE_Q_FP } what_fp=HAVE_NO_FP;
 
 static uint32_t *get_fpcsr_ptr(ucontext_t *uc)
 {
+  /* TODO: Determine which FP extension the core we are running on currently
+   * supports. */
   switch (what_fp) {
   case HAVE_F_FP:
     return &uc->uc_mcontext.__fpregs.__f.__fcsr;
@@ -228,14 +243,14 @@ static uint32_t *get_fpcsr_ptr(ucontext_t *uc)
   }
 }
 
+/* Get fpcsr from the provided ucontext. */
 static int get_fpcsr(const ucontext_t *uc, arch_fp_csr_t *f)
 {
   const uint32_t *fpcsr = get_fpcsr_ptr((ucontext_t*)uc);
 
-  if (fpcsr) { 
-    uint32_t ften;
-    __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
-    f->val = ((uint64_t) *fpcsr) | ((uint64_t) ften << 32);
+  if (fpcsr) {
+    uint32_t ften = riscv_get_fflags_mask();
+    f->val = ((uint64_t) ften << 32) | ((uint64_t) *fpcsr);
     return 0;
   } else {
     return -1;
@@ -248,10 +263,9 @@ static int set_fpcsr(ucontext_t *uc, const arch_fp_csr_t *f)
 
   if (fpcsr) {
     uint32_t lower = (uint32_t)f->val;
-    uint32_t __attribute__((unused)) upper = (uint32_t)(f->val >> 32);
+    uint32_t upper = (uint32_t)(f->val >> 32);
     *fpcsr = lower;
-
-    __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(lower));
+    riscv_set_fflags_mask(upper);
     return 0;
   } else {
     return -1;
@@ -382,43 +396,38 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state)
 
 void arch_clear_fp_exceptions(ucontext_t *uc)
 {
-  arch_fp_csr_t f;
-
-  arch_get_machine_fp_csr(&f);
-
-  f.val &= ~FLAG_MASK;
-
-  arch_set_machine_fp_csr(&f);
+  uint32_t *fpcsr = get_fpcsr_ptr(uc);
+  if (fpcsr) {
+    *fpcsr &= ~FLAG_MASK;
+  }
 }
+
+/* NOTE: For masking and unmasking traps, we manipulate the "fflags_care" mask
+ * CSR directly. We handle the fflags (fcsr) register through the ucontext
+ * structure because Linux already has all the save & restoration infrastructure
+ * set up for us.
+ * TODO: Does Linux handle the fflags_care CSR? */
 
 void arch_mask_fp_traps(ucontext_t *uc)
 {
-  arch_fp_csr_t f;
-
-  arch_get_machine_fp_csr(&f);
-
-  f.val &= ~ENABLE_MASK;
-
-  arch_set_machine_fp_csr(&f);
+  uint32_t fflags = riscv_get_fflags_mask();
+  fflags &= ~ENABLE_MASK;
+  riscv_set_fflags_mask(fflags);
 }
 
 void arch_unmask_fp_traps(ucontext_t *uc)
 {
-  arch_fp_csr_t f;
-
-  arch_get_machine_fp_csr(&f);
-
-  f.val |= ENABLE_MASK;
-
-  arch_set_machine_fp_csr(&f);
-}  
+  uint32_t fflags = riscv_get_fflags_mask();
+  fflags |= ENABLE_MASK;
+  riscv_set_fflags_mask(fflags);
+}
 
 #define FCSR_ROUND_MASK (0x70UL)
 
 fpspy_round_config_t arch_get_machine_round_config(void)
 {
-  uint64_t fcsr =  get_fcsr_machine();
-  uint32_t fcsr_round = fcsr &  FCSR_ROUND_MASK;
+  uint32_t fcsr = riscv_get_fcsr();
+  uint32_t fcsr_round = fcsr & FCSR_ROUND_MASK;
   return fcsr_round;
 }
 
@@ -622,8 +631,8 @@ static int make_my_exec_regions_writeable()
 int  arch_process_init(void)
 {
   DEBUG("riscv64 process init\n");
-  // do better than this guess
-  what_fp = HAVE_D_FP; 
+  // TODO: Actually figure out the FP extension in-use
+  what_fp = HAVE_D_FP;
   return make_my_exec_regions_writeable();
 }
 
