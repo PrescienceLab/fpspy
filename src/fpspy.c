@@ -1061,7 +1061,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
   }
   
   if (mc->state == AWAIT_TRAP) { 
-    DEBUG("COMMON case for brk_trap_handler");
+    DEBUG("COMMON case for brk_trap_handler\n");
     mc->count++;
     arch_clear_fp_exceptions(uc);         
     if (maxcount!=-1 && mc->count >= maxcount) { 
