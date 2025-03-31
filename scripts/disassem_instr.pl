@@ -8,10 +8,15 @@
 
 $#ARGV==-1 or $#ARGV==0 or die "usage: decode_instr.pl hexbytes or < hexbytes\n";
 
-$myarch=`uname -m`;  chomp($myarch);
-
-if ($myarch eq "x86_64") { $myarch = "x64";}
-if ($myarch eq "aarch64") { $myarch = "arm64";}
+if ($ENV{FPSPY_ARCH}) {
+    $myarch=$ENV{FPSPY_ARCH};
+} else {
+    $myarch=`uname -m`;  chomp($myarch);
+    
+    if ($myarch eq "x86_64") { $myarch = "x64";}
+    if ($myarch eq "aarch64") { $myarch = "arm64";}
+    if ($myarch eq "riscv64") { $myarch = "riscv64";}
+}
     
 
 $cmd = "disassem_instr_$myarch.pl";
