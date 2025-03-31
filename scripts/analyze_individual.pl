@@ -13,6 +13,16 @@ $file = shift;
 
 $dis = $#ARGV==0;
 
+if ($ENV{FPSPY_ARCH}) {
+    $myarch=$ENV{FPSPY_ARCH};
+} else {
+    $myarch=`uname -m`;  chomp($myarch);
+    
+    if ($myarch eq "x86_64") { $myarch = "x64";}
+    if ($myarch eq "aarch64") { $myarch = "arm64";}
+    if ($myarch eq "riscv64") { $myarch = "riscv64";}
+}
+
 open(S,"parse_individual.pl $file |") or die "cannot open\n";
 
 $n=0;
