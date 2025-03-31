@@ -1427,6 +1427,8 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
   }
 #endif
 
+  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = riscv_get_fcsr();
+
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
   /* NOTE: skip_estep MUST come before brk_trap_handler! */
