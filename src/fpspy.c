@@ -1324,7 +1324,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
         __func__, (uintptr_t)ppe_fpe_handler);
 
   siginfo_t fake_siginfo = {0};
-  ucontext_t fake_ucontext;
+  ucontext_t fake_ucontext = {0};
   arch_fp_csr_t old_fcsr;
   
   arch_get_machine_fp_csr(&old_fcsr);
@@ -1414,7 +1414,7 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
   DEBUG("%s (0x%016lx): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
         __func__, (uintptr_t) ppe_estep_handler);
   siginfo_t fake_siginfo = {0};
-  ucontext_t fake_ucontext;
+  ucontext_t fake_ucontext = {0};
 
   siginfo_t *si = (siginfo_t *)&fake_siginfo;
 
