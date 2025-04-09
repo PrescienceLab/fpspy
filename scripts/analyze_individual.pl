@@ -17,7 +17,7 @@ if ($ENV{FPSPY_ARCH}) {
     $myarch=$ENV{FPSPY_ARCH};
 } else {
     $myarch=`uname -m`;  chomp($myarch);
-    
+
     if ($myarch eq "x86_64") { $myarch = "x64";}
     if ($myarch eq "aarch64") { $myarch = "arm64";}
     if ($myarch eq "riscv64") { $myarch = "riscv64";}
@@ -31,10 +31,13 @@ while (<S>) {
     chomp;
     @cols = split(/\s+/);
     #    $ts=$cols[0];
-    #    $type=$cols[1];
+    $type=$cols[1];
     $rip=$cols[2];
     #    $sp=$cols[3]
+    $mxcsr=$cols[5];
     $inst=$cols[6];
+    $types{$type}++;
+    $mxcsrs{$mxcsr}++;
     $rips{$rip}++;
     $insts{$inst}++;
     $n++;
@@ -43,6 +46,12 @@ while (<S>) {
 close(S);
 
 print "Saw $n events:\n";
+
+print "\nBy TYPE\n";
+map { print  "\t", $types{$_}, "\t", $_, "\n";  }    sort { $types{$b} <=> $types{$a} }   keys %types;
+
+print "\nBy MXCSR\n";
+map { print  "\t", $mxcsrs{$_}, "\t", $_, "\n";  }    sort { $mxcsrs{$b} <=> $mxcsrs{$a} }   keys %mxcsrs;
 
 print "\nBy RIP\n";
 map { print  "\t", $rips{$_}, "\t", $_, "\n";  }    sort { $rips{$b} <=> $rips{$a} }   keys %rips;
@@ -58,5 +67,3 @@ map {
 	print  "\t", $insts{$_}, "\t", $_, "\n";
     }
 } sort { $insts{$b} <=> $insts{$a} }  keys %insts;
-    
-
