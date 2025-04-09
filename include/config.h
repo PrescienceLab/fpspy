@@ -22,5 +22,18 @@
 #define CONFIG_TRAP_PIPELINED_EXCEPTIONS 1
 #define CONFIG_RISCV_USE_ESTEP     1
 
+#if !defined(riscv64) && (CONFIG_RISCV_HAVE_FP_TRAPS || CONFIG_TRAP_PIPELINED_EXCEPTIONS || CONFIG_RISCV_USE_ESTEP)
+#warning Disabling RISC-V FP Traps, Pipelined Exceptions, and Estep as it is not available on this architecture
+#undef CONFIG_RISCV_HAVE_FP_TRAPS
+#undef CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#undef CONFIG_RISCV_USE_ESTEP
+#define CONFIG_RISCV_HAVE_FP_TRAPS 0
+#define CONFIG_TRAP_PIPELINED_EXCEPTIONS 0
+#define CONFIG_RISCV_USE_ESTEP     0
+#endif
+
+
+#define CONFIG_NO_DEBUG_OUTPUT 1
+
 // intercept our own sigsegv/sigbus
 #define CONFIG_INTERCEPT_MEMORY_FAULTS 1
