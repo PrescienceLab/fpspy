@@ -2,7 +2,7 @@
 
   Part of FPSpy
 
-  Preload library with floating point exception interception 
+  Preload library with floating point exception interception
   aggregation via FPE sticky behavior and trap-and-emulate
 
   Copyright (c) 2017 Peter A. Dinda - see LICENSE
@@ -22,7 +22,7 @@
 
   - Aggregate.  Here all that is done is to capture fpe sticky exception state
     at program start, and then again at program end.   This lets us determine,
-    for a program that is not using fpe* / fpe signal itself, whether any of the 
+    for a program that is not using fpe* / fpe signal itself, whether any of the
     fpe exceptions have occurred during its execution.
 
   - Individual.  Here we intercept each exception that occurs, using a debugger-style
@@ -159,7 +159,7 @@ static int (*orig_fedisableexcept)(int) = 0 ;
 static int (*orig_fegetexcept)() = 0 ;
 static int (*orig_feclearexcept)(int) = 0 ;
 static int (*orig_fegetexceptflag)(fexcept_t *flagp, int excepts) = 0 ;
-static int (*orig_feraiseexcept)(int excepts) = 0; 
+static int (*orig_feraiseexcept)(int excepts) = 0;
 static int (*orig_fesetexceptflag)(const fexcept_t *flagp, int excepts) = 0;
 static int (*orig_fetestexcept)(int excepts) = 0;
 static int (*orig_fegetround)(void) = 0;
@@ -221,16 +221,19 @@ typedef struct sampler_state {
 } sampler_state_t;
 
 //
-// State used to monitor a thread 
+// State used to monitor a thread
 typedef struct monitoring_context {
   uint64_t start_time; // cycles when context created
   enum {INIT, AWAIT_FPE, AWAIT_TRAP, ABORT} state;
   int aborting_in_trap;
   int tid;
-  int fd; 
+  int fd;
   uint64_t count;
   uint64_t trap_state;       // for use by the architectural trap mechanism
   sampler_state_t sampler;   // used only when sampling is on
+  // for buffering of trace records
+  uint64_t                  trace_record_count;
+  individual_trace_record_t trace_records[CONFIG_TRACE_BUFLEN];
 } monitoring_context_t;
 
 
@@ -240,6 +243,8 @@ typedef struct monitoring_context {
 
 static int  context_lock;
 static monitoring_context_t context[MAX_CONTEXTS];
+
+
 
 static void init_monitoring_contexts()
 {
@@ -263,7 +268,7 @@ static monitoring_context_t *find_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
-  for (i=0;i<MAX_CONTEXTS;i++) { 
+  for (i=0;i<MAX_CONTEXTS;i++) {
     if (context[i].tid == tid) {
       unlock_contexts();
       return &context[i];
@@ -277,7 +282,7 @@ static monitoring_context_t *alloc_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
-  for (i=0;i<MAX_CONTEXTS;i++) { 
+  for (i=0;i<MAX_CONTEXTS;i++) {
     if (!context[i].tid) {
       context[i].tid = tid;
       unlock_contexts();
@@ -292,7 +297,7 @@ static void free_monitoring_context(int tid)
 {
   int i;
   lock_contexts();
-  for (i=0;i<MAX_CONTEXTS;i++) { 
+  for (i=0;i<MAX_CONTEXTS;i++) {
     if (context[i].tid == tid) {
       context[i].tid = 0;
       unlock_contexts();
@@ -316,14 +321,14 @@ static void seed_rand(sampler_state_t *s, uint64_t seed)
 static inline uint64_t _pump_rand(uint64_t xi, uint64_t a, uint64_t c)
 {
   uint64_t xi_new = (a*xi + c);
-  
+
   return xi_new;
-}    
+}
 
 static inline uint64_t pump_rand(sampler_state_t *s)
 {
   s->rand.xi = _pump_rand(s->rand.xi, 0x5deece66dULL, 0xbULL);
-  
+
   return s->rand.xi;
 }
 
@@ -357,7 +362,7 @@ void init_random(sampler_state_t *s)
 // Draw from an expoential random distribution
 static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 {
-  arch_fp_csr_t oldfpcsr; 
+  arch_fp_csr_t oldfpcsr;
   uint64_t ret = 0;
 
   // snapshot machine FP state, and disable all intercepts
@@ -365,20 +370,20 @@ static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
   arch_config_machine_fp_csr_for_local(&oldfpcsr);
 
   // now we are safe to do FP that might itself change flags
-  
+
   uint64_t r = get_rand(s);
   double u;
   r = r & -2ULL; // make sure that we are not at max
-  
-  
+
+
   u = ((double) r) / ((double) (-1ULL));
-  
+
   // u = [0,1)
-  
+
   u = -log(1.0 - u) * ((double)mean_us);
-  
+
   // now shape u back into a uint64_t
-  
+
   if (u > ((double)(-1ULL))) {
     ret = -1ULL;
   } else {
@@ -387,9 +392,9 @@ static uint64_t next_exp(sampler_state_t *s, uint64_t mean_us)
 
   // restore FP hardware state
   arch_set_machine_fp_csr(&oldfpcsr);
-  
+
   // no more FP after this!
-  
+
   return ret;
 }
 
@@ -417,7 +422,7 @@ static void stringify_current_fe_exceptions(char *buf)
     strcat(buf, "FE_DENORM");
     have=1;
   }
-  
+
   if (!have) {
     strcpy(buf,"NO_EXCEPTIONS_RECORDED");
   }
@@ -434,7 +439,7 @@ static int writeall(int fd, void *buf, int len)
 {
   int n;
   int left = len;
-  
+
   do {
     n = write(fd,buf,left);
     if (n<0) {
@@ -443,9 +448,43 @@ static int writeall(int fd, void *buf, int len)
     left -= n;
     buf += n;
   } while (left>0);
-  
+
   return 0;
 }
+
+
+static int flush_trace_records(monitoring_context_t *mc)
+{
+    if (CONFIG_TRACE_BUFLEN==0) {
+	return 0;
+    } else {
+	if (mc->trace_record_count>0) {
+	    int rc=writeall(mc->fd,
+			    mc->trace_records,
+			    mc->trace_record_count*sizeof(individual_trace_record_t));
+	    mc->trace_record_count=0;
+	    return rc;
+	} else {
+	    return 0;
+	}
+    }
+}
+
+static inline int push_trace_record(monitoring_context_t *mc, individual_trace_record_t *tr)
+{
+    if (CONFIG_TRACE_BUFLEN==0) {
+	return writeall(mc->fd,tr,sizeof(individual_trace_record_t));
+    } else {
+	mc->trace_records[mc->trace_record_count] = *tr;
+	mc->trace_record_count++;
+	if (mc->trace_record_count >= CONFIG_TRACE_BUFLEN) { // should never be > ...
+	    return flush_trace_records(mc);
+	} else {
+	    return 0;
+	}
+    }
+}
+
 
 static void kick_self(void)
 {
@@ -482,7 +521,7 @@ static void abort_operation(char *reason)
       if (!mc) {
 	ERROR("Cannot find monitoring context to write abort record\n");
       } else {
-	
+
 	mc->state = ABORT;
 
 	// write an abort record
@@ -490,11 +529,11 @@ static void abort_operation(char *reason)
 	memset(&r,0xff,sizeof(r));
 
 	r.time = arch_cycle_count() - mc->start_time;
-	
-	if (writeall(mc->fd,&r,sizeof(r))) {
-	  ERROR("Failed to write abort record\n");
+
+	if (push_trace_record(mc,&r)) {
+	  ERROR("Failed to push abort record\n");
 	}
-	
+
       }
 
       // even if we have no monitoring context we need to restore
@@ -508,7 +547,7 @@ static void abort_operation(char *reason)
 
     // finally remove our trap handler
     ORIG_IF_CAN(sigaction,SIGTRAP,&oldsa_trap,0);
-    
+
     aborted = 1;
     DEBUG("Aborted operation because %s\n",reason);
   }
@@ -539,7 +578,7 @@ int fork()
   if (aborted) {
     return rc;
   }
-  
+
   if (rc<0) {
     DEBUG("fork failed\n");
     return rc;
@@ -551,30 +590,30 @@ int fork()
     // we inherit process state from parent, so what this looks like
     // now is like a new thread
     DEBUG("skipping architecture process init on fork\n");
-    
+
     // clear exceptions - we will not inherit the current ones from the parent
     ORIG_IF_CAN(feclearexcept,exceptmask);
 
     // in aggregate mode, a distinct log file will be generated by the destructor
-    
+
     // make new context for individual mode
     if (mode==INDIVIDUAL) {
-      
-      if (bringup_monitoring_context(gettid())) { 
+
+      if (bringup_monitoring_context(gettid())) {
 	ERROR("Failed to start up monitoring context at fork\n");
-	// we won't break, however.. 
+	// we won't break, however..
       } else {
 	// we should have inherited all the sighandlers, etc, from our parent
-	
+
 	// now kick ourselves to set the sse bits; we are currently in state INIT
 	// this will also do the architectural init
-	
+
 	// note that kickstart only applies to "top-level" process
 	// not this child
 	kick_self();
 	// we should now be in the right state
       }
-      
+
     } else {
       // we need to bring up the architecture for this thread
       if (arch_thread_init(0)) {
@@ -582,7 +621,7 @@ int fork()
 	// we are doomed from this point
       }
     }
-    
+
     DEBUG("Done with setup on fork\n");
     return rc;
 
@@ -622,16 +661,16 @@ static void *trampoline(void *p)
 
   // clear exceptions just in case
   ORIG_IF_CAN(feclearexcept,exceptmask);
-  
+
   if (mode==INDIVIDUAL) {
 
     // make new context for individual mode
-    if (bringup_monitoring_context(gettid())) { 
+    if (bringup_monitoring_context(gettid())) {
       ERROR("Failed to start up monitoring context on thread creation\n");
-      // we won't break, however.. 
+      // we won't break, however..
     } else {
       // we should have inherited all the sighandlers, etc, from the spawning thread
-      
+
       // now kick ourselves to set the sse bits; we are currently in state INIT
       kick_self();
       // we should now be in the right state
@@ -642,14 +681,14 @@ static void *trampoline(void *p)
     // we need to do the architecture init here
     arch_thread_init(0);
   }
- 
+
   DEBUG("leaving trampoline\n");
-  
+
   ret = start(arg);
 
   // if it's returning normally instead of via pthread_exit(), we'll do the cleanup here
   pthread_exit(ret);
-  
+
 }
 
 // pthread_create is wrapped so that it can trampoline through our bringup
@@ -663,14 +702,14 @@ int pthread_create(pthread_t *tid, const pthread_attr_t *attr, void *(*start)(vo
   if (aborted) {
     return orig_pthread_create(tid,attr,start,arg);
   }
-  
+
   c.start = start;
   c.arg = arg;
   c.done = 0;
 
   int rc = orig_pthread_create(tid,attr,trampoline,&c);
 
-  if (!rc) { 
+  if (!rc) {
     // don't race on the tramp context - wait for thread to copy out
     while (!__sync_fetch_and_and(&c.done,1)) { }
   }
@@ -685,7 +724,7 @@ static int teardown_monitoring_context(int tid);
 
 // a pthread can stop via an explicit pthread_exit call, so we must
 // intercept that and do a graceful teardown
-__attribute__((noreturn)) void pthread_exit(void *ret)  
+__attribute__((noreturn)) void pthread_exit(void *ret)
 {
   DEBUG("pthread_exit(%p)\n",ret);
 
@@ -708,7 +747,7 @@ sighandler_t signal(int sig, sighandler_t func)
   DEBUG("signal(%d,%p)\n",sig,func);
   SHOW_CALL_STACK();
   if ((sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
-    if (!aggressive) { 
+    if (!aggressive) {
       abort_operation("target is using sigaction with SIGFPE or SIGTRAP (nonaggressive)");
     } else {
       // do not override our signal handlers - we are not aborting
@@ -728,7 +767,7 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact)
   DEBUG("sigaction(%d,%p,%p)\n",sig,act,oldact);
   SHOW_CALL_STACK();
   if ((sig == SIGVTALRM || sig==SIGFPE || sig==SIGTRAP) && mode==INDIVIDUAL && !aborted) {
-    if (!aggressive) { 
+    if (!aggressive) {
       abort_operation("target is using sigaction with SIGFPE, SIGTRAP, or SIGVTALRM");
     } else {
       // do not override our signal handlers - we are not aborting
@@ -786,7 +825,7 @@ int fegetexceptflag(fexcept_t *flagp, int excepts)
 }
 
 // if the target manipulates FP state, we will always get out of the way
-int feraiseexcept(int excepts) 
+int feraiseexcept(int excepts)
 {
   DEBUG("feraiseexcept(0x%x)\n",excepts);
   SHOW_CALL_STACK();
@@ -872,11 +911,11 @@ int feupdateenv(const fenv_t *envp)
 // "shims" are the installation of our overrides of target functions that we need to see
 // We need to capture pointers to the original target functions
 //
-    
+
 static int setup_shims()
 {
 #define SHIMIFY(x) if (!(orig_##x = dlsym(RTLD_NEXT, #x))) { DEBUG("Failed to setup SHIM for " #x "\n");  return -1; }
-    
+
   if (disable_pthreads==0){
     SHIMIFY(pthread_create);
     SHIMIFY(pthread_exit);
@@ -910,32 +949,32 @@ static int setup_shims()
 void init_sampler(sampler_state_t *s)
 {
   DEBUG("Init sampler (%p)\n",s);
-  
+
   init_random(s);
-  
+
   s->on_mean_us = on_mean_us;
   s->off_mean_us = off_mean_us;
-  
+
   s->state = ON;
-  
+
   if (!timers) {
     DEBUG("Sampler without timing\n");
     return;
   }
-  
+
   uint64_t n = next_exp(s,s->on_mean_us);
-  
+
   s->it.it_interval.tv_sec = 0;
   s->it.it_interval.tv_usec = 0;
   s->it.it_value.tv_sec = n / 1000000;
   s->it.it_value.tv_usec = n % 1000000;
-  
+
   if (setitimer(timer_type, &(s->it), NULL)) {
     ERROR("Failed to set timer?!\n");
   }
-  
+
   DEBUG("Timer initialized for %lu us\n",n);
-  
+
 }
 
 // n.b: is it really the case we cannot meaningfully manipulate ucontext
@@ -944,10 +983,10 @@ void init_sampler(sampler_state_t *s)
 static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
 {
   sampler_state_t *s = &mc->sampler;
-  
+
   //arch_dump_gp_csr("update before",uc);
   //arch_dump_fp_csr("update before",uc);
-  
+
   // we are guaranteed to be in AWAIT_FPE state at this
   // point.
   //
@@ -955,10 +994,10 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
   // OFF->ON : clear fpe, unmask fpe, turn off traps
   //
   // traps should already be off, but why not be sure
-  
-  if (s->state==ON) { 
+
+  if (s->state==ON) {
     DEBUG("Switching from on to off\n");
-    arch_clear_fp_exceptions(uc);        // Clear fpe 
+    arch_clear_fp_exceptions(uc);        // Clear fpe
     arch_mask_fp_traps(uc);              // Mask fpe
     arch_reset_trap(uc,&mc->trap_state); // disable traps
   } else {
@@ -967,49 +1006,49 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
     arch_unmask_fp_traps(uc);            //Unmask fpe
     arch_reset_trap(uc,&mc->trap_state); // disable traps
   }
-  
+
   // schedule next wakeup
-  
+
   uint64_t n = next_exp(s,s->state==ON ? s->off_mean_us : s->on_mean_us);
-  
+
   if (!n) {
     // make sure we do actually wake up again
     // n = 0 would disable timer...
     n = 1;
   }
-  
-  if (s->state==OFF && n>MAX_US_ON) { 
+
+  if (s->state==OFF && n>MAX_US_ON) {
     // about to turn on for too long, limit:
     n=MAX_US_ON;
   }
-  
-  if (s->state==ON && n>MAX_US_OFF) { 
+
+  if (s->state==ON && n>MAX_US_OFF) {
     // about to turn off for too long, limit:
     n=MAX_US_OFF;
   }
-  
+
   s->it.it_interval.tv_sec = 0;
   s->it.it_interval.tv_usec = 0;
   s->it.it_value.tv_sec = n / 1000000;
   s->it.it_value.tv_usec = n % 1000000;
-  
+
   // flip state
   s->state = s->state==ON ? OFF : ON ;
-  
+
   // don't reprocess again in case we are running delayed because
   // we were not intially in an AWAIT_FPE
   if (s->delayed_processing) {
     DEBUG("Completed delayed processing\n");
     s->delayed_processing = 0;
   }
-  
+
   if (setitimer(timer_type, &s->it, NULL)) {
     ERROR("Failed to set timer?!\n");
   }
-  
+
   //arch_dump_gp_csr("update after",uc);
   //arch_dump_fp_csr("update after",uc);
-  
+
   DEBUG("Timer reinitialized for %lu us state %s\n",n,s->state==ON ? "ON" : "off");
 }
 
@@ -1025,7 +1064,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
-  if (!mc || mc->state==ABORT) { 
+  if (!mc || mc->state==ABORT) {
       DEBUG("We reached something that should never happen in brk_trap_handler\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
@@ -1041,16 +1080,16 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
     }
     return;
   }
-  
+
   if (mc && mc->state==INIT) {
       DEBUG("We only expect to hit this brk_trap_handler thing once!\n");
     if (arch_thread_init(uc)) {
-      // bad news, probably... 
+      // bad news, probably...
       abort_operation("failed to setup thread for architecture\n");
     }
     orig_round_config = arch_get_round_config(uc);
     arch_clear_fp_exceptions(uc);
-    arch_unmask_fp_traps(uc);    
+    arch_unmask_fp_traps(uc);
     if (control_round_config) {
       arch_set_round_config(uc,our_round_config);
     }
@@ -1059,14 +1098,14 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
     DEBUG("state initialized - waiting for first SIGFPE\n");
     return;
   }
-  
-  if (mc->state == AWAIT_TRAP) { 
+
+  if (mc->state == AWAIT_TRAP) {
     DEBUG("COMMON case for brk_trap_handler\n");
     mc->count++;
-    arch_clear_fp_exceptions(uc);         
-    if (maxcount!=-1 && mc->count >= maxcount) { 
+    arch_clear_fp_exceptions(uc);
+    if (maxcount!=-1 && mc->count >= maxcount) {
       // disable further operation since we've recorded enough
-      arch_mask_fp_traps(uc);             
+      arch_mask_fp_traps(uc);
       if (control_round_config) {
 	arch_set_round_config(uc,orig_round_config);
       }
@@ -1094,25 +1133,25 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
     abort_operation("Surprise state during sigtrap_handler exec");
   }
 }
-  
+
 //
 // FPSpy gets a SIGTRAP when the current instruction follows a FP
-// instruction for which we took a SIGFPE.  
+// instruction for which we took a SIGFPE.
 //
 static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 {
   ucontext_t *uc = (ucontext_t *)priv;
 
-  
+
   DEBUG("TRAP signo 0x%x errno 0x%x code 0x%x ip %p\n",
         si->si_signo, si->si_errno, si->si_code, si->si_addr);
   DEBUG("TRAP ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n",
         (void*) arch_get_ip(uc), (void*) arch_get_sp(uc),
 	arch_get_fp_csr(uc), arch_get_gp_csr(uc));
-  
+
   brk_trap_handler(si,uc);
 
- 
+
 
   DEBUG("TRAP done\n");
 }
@@ -1139,8 +1178,8 @@ static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
     return;
   }
 
-  if (!(mc->count % sample_period)) { 
-    individual_trace_record_t r;  
+  if (!(mc->count % sample_period)) {
+    individual_trace_record_t r;
 
     r.time = arch_cycle_count() - mc->start_time;
     r.rip = (void*) arch_get_ip(uc);
@@ -1155,11 +1194,11 @@ static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
     //    DEBUG("writing record: %lu ip=%p sp=%p code=0x%x, fpcsr=%08x, inst=%08x\n",
     //           r.time, r.rip, r.rsp, r.code, r.mxcsr, *(uint32_t*)r.instruction);
 
-    if (writeall(mc->fd,&r,sizeof(r))) {
-      ERROR("Failed to write record\n");
+    if (push_trace_record(mc,&r)) {
+      ERROR("Failed to push record\n");
     }
   }
-  
+
 
   if (mc->state == AWAIT_FPE) {
     arch_clear_fp_exceptions(uc);
@@ -1185,7 +1224,7 @@ static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
 // This is the entry for FP traps when regular SIGFPEs are used
 //
 static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
-{  
+{
   ucontext_t *uc = (ucontext_t *)priv;
 
   DEBUG("SIGFPE signo 0x%x errno 0x%x code 0x%x ip %p \n",
@@ -1212,15 +1251,15 @@ static void sigfpe_handler(int sig, siginfo_t *si,  void *priv)
     }
 
     DEBUG("FPE %s\n", buf);
-  
+
   }
-  
+
   fp_trap_handler(si,uc);
 
   DEBUG("SIGFPE done\n");
 
   // copy back our limited gregset_t
-  
+
 
 }
 
@@ -1243,7 +1282,7 @@ static void memfault_handler(int sig, siginfo_t *si, void *priv)
   DEBUG("%s ip=%p sp=%p addr=%p reason: %d (%s)\n",
 	sig==SIGSEGV ? "SIGSEGV" : sig==SIGBUS ? "SIGBUS" : "UNKNOWN SIGNAL",
 	ip,sp,addr,si->si_code,
-	si->si_code==SEGV_MAPERR ? "MAPERR" : si->si_code==SEGV_ACCERR ? "PERM" : "UNKNOWN"); 
+	si->si_code==SEGV_MAPERR ? "MAPERR" : si->si_code==SEGV_ACCERR ? "PERM" : "UNKNOWN");
 
   Dl_info dli;
   if (dladdr(ip,&dli)) {
@@ -1256,7 +1295,7 @@ static void memfault_handler(int sig, siginfo_t *si, void *priv)
     DEBUG("cannot resolve function\n");
   }
 
-  
+
   // note that the following will likely be useless since we're looking at
   // the signal stack, not the application stack
   int  count=64;
@@ -1326,7 +1365,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext = {0};
   arch_fp_csr_t old_fcsr;
-  
+
   arch_get_machine_fp_csr(&old_fcsr);
   uint64_t fcsr = old_fcsr.val & 0xffffffffUL;
 
@@ -1342,7 +1381,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   } else if (err == 0x01) { /* Precision */
     fake_siginfo.si_code = FPE_FLTRES;
   }
-  
+
   siginfo_t *si = (siginfo_t *)&fake_siginfo;
 
 #if USE_MEMCPY
@@ -1357,14 +1396,14 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
   fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
- 
+
   uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
 
   DEBUG(
   "PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n",
   si->si_signo, si->si_errno, si->si_code, si->si_addr, *(uint32_t*)pc);
   DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
-  
+
   if (log_level > 1) {
     char buf[80];
 
@@ -1385,7 +1424,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
     DEBUG("FPE exceptions %s\n", buf);
 
   }
-  
+
   fp_trap_handler(si,uc);
 
   /* XXX: We assume D extension here! */
@@ -1510,7 +1549,7 @@ static inline void fxrstor(const struct _libc_fpstate *fpvm_fpregs)
 //             rsp      |  like gregset
 //             rcx      |
 //             ...      |
-//  rsp + 0    r8       v  
+//  rsp + 0    r8       v
 //
 // the handler will create a fake ucontext_t from this
 // and a snapshot of FP state.  The user should assume
@@ -1523,19 +1562,19 @@ void fpspy_short_circuit_handler(void *priv)
 {
   // Build up a sufficiently detailed ucontext_t and
   // call the shared handler.  Copy in/out the FP and GP
-  // state 
-  
-  siginfo_t fake_siginfo = {0};     
-  struct _libc_fpstate fpregs; 
+  // state
+
+  siginfo_t fake_siginfo = {0};
+  struct _libc_fpstate fpregs;
   ucontext_t fake_ucontext;
   uint32_t old;
-  
+
   // capture FP state (note that this eventually needs to do xsave)
   // no code we call can safely deal with the fpregs beyond SSE
   fxsave(&fpregs);
 
   old = get_mxcsr();
-  
+
   uint32_t err = ~(old >> 7) & old;
   if (err & 0x001) {	/* Invalid op*/
     fake_siginfo.si_code = FPE_FLTINV;
@@ -1548,7 +1587,7 @@ void fpspy_short_circuit_handler(void *priv)
   } else if (err & 0x020) { /* Precision */
     fake_siginfo.si_code = FPE_FLTRES;
   }
-  
+
   siginfo_t * si = (siginfo_t *)&fake_siginfo;
 
   fake_ucontext.uc_mcontext.fpregs = &fpregs;
@@ -1562,7 +1601,7 @@ void fpspy_short_circuit_handler(void *priv)
 #endif
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
- 
+
   uint8_t *rip = (uint8_t*) uc->uc_mcontext.gregs[REG_RIP];
 
   DEBUG(
@@ -1571,7 +1610,7 @@ void fpspy_short_circuit_handler(void *priv)
 	si->si_signo, si->si_errno, si->si_code, si->si_addr, rip[0], rip[1], rip[2], rip[3], rip[4],
 	rip[5], rip[6], rip[7], rip[8], rip[9], rip[10], rip[11], rip[12], rip[13], rip[14], rip[15]);
   DEBUG("SCFPE RIP=%p RSP=%p\n", rip, (void *)uc->uc_mcontext.gregs[REG_RSP]);
-  
+
   if (log_level > 1) {
     char buf[80];
 
@@ -1592,7 +1631,7 @@ void fpspy_short_circuit_handler(void *priv)
     DEBUG("FPE exceptions %s\n", buf);
 
   }
-  
+
   fp_trap_handler(si,uc);
 
   DEBUG("SCFPE  done\n");
@@ -1605,7 +1644,7 @@ void fpspy_short_circuit_handler(void *priv)
       ((greg_t*)priv)[i] = fake_ucontext.uc_mcontext.gregs[i];
   }
 #endif
-  
+
   // restore FP state (note that this eventually needs to do xsave)
   // really, the only thing that should change is mxcsr, so this is
   // doing too much work
@@ -1635,7 +1674,7 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
 
   DEBUG("Handling break\n");
 
-  if (oldsa_int.sa_sigaction) { 
+  if (oldsa_int.sa_sigaction) {
     fpspy_deinit(); // dump everything out
     // invoke underlying handler
     oldsa_int.sa_sigaction(sig,si,priv);
@@ -1645,7 +1684,7 @@ static void sigint_handler(int sig, siginfo_t *si,  void *priv)
   }
 }
 
-    
+
 
 //
 // FPspy handles SIGALRM in time-based sampling mode.  The
@@ -1655,9 +1694,9 @@ static void sigalrm_handler(int sig, siginfo_t *si,  void *priv)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
   ucontext_t *uc = (ucontext_t *)priv;
-  
+
   DEBUG("Timeout for %d\n", gettid());
-  
+
   if (!mc) {
     ERROR("Could not find monitoring context for %d\n",gettid());
     return;
@@ -1684,14 +1723,14 @@ static int bringup_monitoring_context(int tid)
   monitoring_context_t *c;
   char name[80];
 
-  if (!(c = alloc_monitoring_context(tid))) { 
+  if (!(c = alloc_monitoring_context(tid))) {
     ERROR("Cannot allocate monitoring context\n");
     return -1;
   }
 
   if (create_monitor_file) {
     sprintf(name,"__%s.%lu.%d.individual.fpemon", program_invocation_short_name, time(0), tid);
-    if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) { 
+    if ((c->fd = open(name,O_CREAT | O_WRONLY, 0666))<0) {
       ERROR("Cannot open monitoring output file\n");
       free_monitoring_context(tid);
       return -1;
@@ -1699,7 +1738,7 @@ static int bringup_monitoring_context(int tid)
   }
 
 #if CONFIG_TRAP_SHORT_CIRCUITING
-  if (kernel && kernel_fd!=-1) { 
+  if (kernel && kernel_fd!=-1) {
     extern void * _user_fpspy_entry;
     if (ioctl(kernel_fd, FPVM_IOCTL_REG, &_user_fpspy_entry)) {
       ERROR("SC failed to ioctl kernel support (/dev/fpvm_dev), very bad\n");
@@ -1714,7 +1753,7 @@ static int bringup_monitoring_context(int tid)
 #if CONFIG_TRAP_PIPELINED_EXCEPTIONS
   init_pipelined_exceptions();
 #endif
-  
+
   c->start_time = arch_cycle_count();
   c->state = INIT;
   c->aborting_in_trap = 0;
@@ -1722,7 +1761,7 @@ static int bringup_monitoring_context(int tid)
   c->trap_state = 0;
 
   init_sampler(&c->sampler);
-  
+
   return 0;
 }
 
@@ -1738,7 +1777,9 @@ static int teardown_monitoring_context(int tid)
 
   // add later - not relevant now PAD
   // deinit_sampler(&mc->sampler);
- 
+
+  flush_trace_records(mc);
+
   close(mc->fd);
 
   free_monitoring_context(tid);
@@ -1752,19 +1793,19 @@ static int teardown_monitoring_context(int tid)
 //
 // Bringup FPSpy in the process
 //
- 
+
 static int bringup()
 {
   if (arch_process_init()) {
     ERROR("Cannot initialize architecture\n");
     return -1;
   }
-  
-  if (setup_shims()) { 
+
+  if (setup_shims()) {
     ERROR("Cannot setup shims\n");
     return -1;
   }
-  
+
   ORIG_IF_CAN(feclearexcept,exceptmask);
 
 #if CONFIG_INTERCEPT_MEMORY_FAULTS
@@ -1786,17 +1827,17 @@ static int bringup()
   if (mode==INDIVIDUAL) {
 
     struct sigaction sa;
-    
+
     int alarm_sig =
-      timer_type==ITIMER_REAL ? SIGALRM : 
+      timer_type==ITIMER_REAL ? SIGALRM :
       timer_type==ITIMER_VIRTUAL ? SIGVTALRM :
       timer_type==ITIMER_PROF ? SIGPROF : SIGALRM;
-    
+
     init_monitoring_contexts();
-   
+
 #if CONFIG_TRAP_SHORT_CIRCUITING
     // need to do this early because we rely on bringup_monitoring_context
-    if (kernel && kernel_fd==-1) { 
+    if (kernel && kernel_fd==-1) {
       kernel_fd = open("/dev/fpvm_dev", O_RDWR);
       if (kernel_fd < 0) {
 	ERROR("SC failed to open kernel support (/dev/fpvm_dev), falling back to signal handler\n");
@@ -1817,9 +1858,9 @@ static int bringup()
     if (kernel && kernel_fd>0) {
       goto skip_setup_sigfpe;
     }
-    
+
 #endif
-    
+
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigfpe_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1832,7 +1873,7 @@ static int bringup()
 #if CONFIG_TRAP_SHORT_CIRCUITING
   skip_setup_sigfpe:
 #endif
-    
+
     memset(&sa,0,sizeof(sa));
     sa.sa_sigaction = sigtrap_handler;
     sa.sa_flags |= SA_SIGINFO;
@@ -1840,7 +1881,7 @@ static int bringup()
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTRAP);
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig); }
-    sigaddset(&sa.sa_mask, SIGFPE); 
+    sigaddset(&sa.sa_mask, SIGFPE);
     ORIG_IF_CAN(sigaction,SIGTRAP,&sa,&oldsa_trap);
 
     memset(&sa,0,sizeof(sa));
@@ -1849,7 +1890,7 @@ static int bringup()
     sigemptyset(&sa.sa_mask);
     sigaddset(&sa.sa_mask, SIGTRAP);
     if (timers) { sigaddset(&sa.sa_mask, alarm_sig);}
-    
+
     ORIG_IF_CAN(sigaction,SIGINT,&sa,&oldsa_int);
 
     if (timers) {
@@ -1864,7 +1905,7 @@ static int bringup()
 		  alarm_sig,
 		  &sa,&oldsa_alrm);
     }
-    
+
     if (kickstart) {
       INFO("Send SIGTRAP to process %d to start\n",getpid());
     } else {
@@ -1872,7 +1913,7 @@ static int bringup()
       // this will also do the architecture init for the thread
       kick_self();
     }
-    
+
   } else {
     // we need to bring up the architectural state for the thread
     if (arch_thread_init(0)) {
@@ -1889,7 +1930,7 @@ static int bringup()
 #if x64
   DEBUG("machine fpcsr=%08x\n",f.val);
 #endif
-  
+
   inited=1;
   DEBUG("Done with setup\n");
   return 0;
@@ -1905,10 +1946,10 @@ static void config_exceptions(char *buf)
     DEBUG("ignoring exception list for aggregate mode\n");
     return ;
   }
-  
+
   exceptmask = 0;
   arch_clear_trap_mask();
-  
+
   if (strcasestr(buf,"inv")) {
     DEBUG("tracking INVALID\n");
     exceptmask |= FE_INVALID ;
@@ -1947,7 +1988,7 @@ static void config_round_daz_ftz(char *buf)
   orig_round_config = arch_get_machine_round_config();
 
   our_round_config = 0;
-  
+
   if (strcasestr(buf,"pos")) {
     arch_set_round_mode(&our_round_config,FPSPY_ROUND_POSITIVE);
   } else if (strcasestr(buf,"neg")) {
@@ -1976,13 +2017,13 @@ static void config_round_daz_ftz(char *buf)
   DEBUG("Configuring rounding control to 0x%08x\n", our_round_config);
 
 }
-    
+
 
 
 // This is where FPSpy execution begins in a process -
 // this is called on load of preload library, prior to main()
 // of the target
-static __attribute__((constructor)) void fpspy_init(void) 
+static __attribute__((constructor)) void fpspy_init(void)
 {
 
   INFO("init\n");
@@ -2019,19 +2060,19 @@ static __attribute__((constructor)) void fpspy_init(void)
 	  ERROR("FPSPY_MODE is given, but mode %s does not make sense\n",getenv("FPSPY_MODE"));
 	  abort();
 	}
-      } 
+      }
     } else {
       mode=AGGREGATE;
       DEBUG("No FPSPY_MODE is given, so assuming AGGREGATE mode\n");
     }
-    if (getenv("FPSPY_MAXCOUNT")) { 
+    if (getenv("FPSPY_MAXCOUNT")) {
       maxcount = atoi(getenv("FPSPY_MAXCOUNT"));
     }
     if (getenv("FPSPY_AGGRESSIVE") && tolower(getenv("FPSPY_AGGRESSIVE")[0])=='y') {
       DEBUG("Setting AGGRESSIVE\n");
       aggressive=1;
     }
-    if ((getenv("FPSPY_DISABLE_PTHREADS") && tolower(getenv("FPSPY_DISABLE_PTHREADS")[0])=='y') || 
+    if ((getenv("FPSPY_DISABLE_PTHREADS") && tolower(getenv("FPSPY_DISABLE_PTHREADS")[0])=='y') ||
 	(getenv("DISABLE_PTHREADS") && tolower(getenv("DISABLE_PTHREADS")[0])=='y') ) {
       disable_pthreads=1;
     }
@@ -2090,7 +2131,7 @@ static __attribute__((constructor)) void fpspy_init(void)
     if (getenv("FPSPY_ABORT") && tolower(getenv("FPSPY_ABORT")[0])=='y') {
       abort_on_fpe = 1;
     }
-    if (bringup()) { 
+    if (bringup()) {
       ERROR("cannot bring up framework\n");
       return;
     }
@@ -2113,10 +2154,10 @@ static void handle_aggregate_thread_exit()
   DEBUG("Dumping aggregate exceptions\n");
   //show_current_fe_exceptions();
   sprintf(buf,"__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0),gettid());
-  if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) { 
+  if ((fd = open(buf,O_CREAT | O_WRONLY, 0666))<0) {
     ERROR("Cannot open monitoring output file\n");
   } else {
-    if (!aborted) { 
+    if (!aborted) {
       stringify_current_fe_exceptions(buf);
       strcat(buf,"\n");
     } else {
@@ -2130,21 +2171,22 @@ static void handle_aggregate_thread_exit()
   }
 }
 
-    
+
 // Last thing FPSpy should see.   This should get called
 // when we fall off of main() in the target
-static __attribute__((destructor)) void fpspy_deinit(void) 
-{ 
+static __attribute__((destructor)) void fpspy_deinit(void)
+{
   // destroy the tracer thread
   DEBUG("deinit\n");
-  if (inited) { 
+  if (inited) {
     if (mode==AGGREGATE) {
       handle_aggregate_thread_exit();
     } else {
+      teardown_monitoring_context(gettid());
       int i;
       DEBUG("FPE exceptions previously dumped to files - now closing them\n");
-      for (i=0;i<MAX_CONTEXTS;i++) { 
-	if (context[i].tid) { 
+      for (i=0;i<MAX_CONTEXTS;i++) {
+	if (context[i].tid) {
 	  close(context[i].fd);
 	}
       }
@@ -2159,4 +2201,3 @@ static __attribute__((destructor)) void fpspy_deinit(void)
   inited=0;
   DEBUG("done\n");
 }
-

@@ -37,3 +37,8 @@
 
 // intercept our own sigsegv/sigbus
 #define CONFIG_INTERCEPT_MEMORY_FAULTS 1
+
+
+// This is the number of records that will be buffered
+// size zero means no buffering of trace records
+#define CONFIG_TRACE_BUFLEN 256
