@@ -1338,7 +1338,9 @@ void init_pipelined_exceptions(void) {
 
   ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
   ioctl(fd, PIPELINED_DELEGATE_DELEGATE_TRAPS, &config);
-  close(fd);
+  /* NOTE: You must leave the pipelined delegation character device open for the
+   * ENTIRE lifetime of the process. Closing the character device resets the
+   * core's delegation registers to a default state! */
 }
 
 
@@ -2195,6 +2197,7 @@ static __attribute__((destructor)) void fpspy_deinit(void)
 	close(kernel_fd);
       }
 #endif
+      /* TODO: Close the RISC-V pipelined character device! */
     }
   }
   arch_process_deinit();
