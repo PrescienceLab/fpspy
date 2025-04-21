@@ -101,7 +101,7 @@ static uint64_t ften_base = 0x1fUL;
 // clearing the mask => enable all
 void arch_clear_trap_mask(void)
 {
-  ften_base = 0x1f00000000;
+  ften_base = 0x1FUL;
 }
 
 /* Set trap mask means the provided WHICH FP trap is DISABLED. */
