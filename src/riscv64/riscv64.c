@@ -104,6 +104,7 @@ void arch_clear_trap_mask(void)
   ften_base = 0x1f00000000;
 }
 
+/* Set trap mask means the provided WHICH FP trap is DISABLED. */
 void arch_set_trap_mask(int which)
 {
   switch (which) {
@@ -128,6 +129,7 @@ void arch_set_trap_mask(int which)
   }
 }
 
+/* Reset trap mask means the provided WHICH FP trap is ENABLED. */
 void arch_reset_trap_mask(int which)
 {
   switch (which) {
