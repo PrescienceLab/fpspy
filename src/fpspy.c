@@ -1964,32 +1964,49 @@ static void config_exceptions(char *buf)
   if (strcasestr(buf,"inv")) {
     DEBUG("tracking INVALID\n");
     enabled_fp_traps |= FE_INVALID;
+  } else {
+    DEBUG("disabling INVALID\n");
     arch_set_trap_mask(FE_INVALID);
   }
+
   if (strcasestr(buf,"den")) {
     DEBUG("tracking DENORM\n");
     // not provided in standard interface, catch via arch-specific...
     enabled_fp_traps |= 0;
+  } else {
+    DEBUG("disabling DENORM\n");
     arch_set_trap_mask(FE_DENORM);
   }
+
   if (strcasestr(buf,"div")) {
     DEBUG("tracking DIVIDE_BY_ZERO\n");
     enabled_fp_traps |= FE_DIVBYZERO;
+  } else {
+    DEBUG("disabling DIVIDE_BY_ZERO\n");
     arch_set_trap_mask(FE_DIVBYZERO);
   }
+
   if (strcasestr(buf,"over")) {
     DEBUG("tracking OVERFLOW\n");
     enabled_fp_traps |= FE_OVERFLOW;
+  } else {
+    DEBUG("disabling OVERFLOW\n");
     arch_set_trap_mask(FE_OVERFLOW);
   }
+
   if (strcasestr(buf,"under")) {
     DEBUG("tracking UNDERFLOW\n");
     enabled_fp_traps |= FE_UNDERFLOW;
+  } else {
+    DEBUG("disabling UNDERFLOW\n");
     arch_set_trap_mask(FE_UNDERFLOW);
   }
+
   if (strcasestr(buf,"prec")) {
     DEBUG("tracking PRECISION\n");
     enabled_fp_traps |= FE_INEXACT;
+  } else {
+    DEBUG("disabling PRECISION\n");
     arch_set_trap_mask(FE_INEXACT);
   }
 
