@@ -1953,7 +1953,14 @@ static void config_exceptions(char *buf)
   }
 
   enabled_fp_traps = 0;
-  arch_clear_trap_mask();
+  /* The trap mask uses x86's notion of an FPE mask. Namely, exceptions are
+   * delivered to the core only when the corresponding mask bit is 0!
+   * Thus, clearing the mask (setting to all 0s) enables all FPEs! */
+  arch_clear_trap_mask(); // Enable everything
+
+  /* If we DON'T have one of these things in the provided exception list, then
+   * selectively DISABLE each of the exceptions by setting the relevant mask bit
+   * to 1. */
   if (strcasestr(buf,"inv")) {
     DEBUG("tracking INVALID\n");
     enabled_fp_traps |= FE_INVALID;
