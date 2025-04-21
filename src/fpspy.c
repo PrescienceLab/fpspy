@@ -504,9 +504,9 @@ static __attribute__((constructor)) void fpspy_init(void);
 static void abort_operation(char *reason)
 {
   if (!inited) {
-    DEBUG("Initializing before aborting\n");
+    ERROR("Initializing before aborting\n");
     fpspy_init();
-    DEBUG("Done with fpspy_init()\n");
+    ERROR("Done with fpspy_init()\n");
   }
 
   if (!aborted) {
@@ -549,7 +549,7 @@ static void abort_operation(char *reason)
     ORIG_IF_CAN(sigaction,SIGTRAP,&oldsa_trap,0);
 
     aborted = 1;
-    DEBUG("Aborted operation because %s\n",reason);
+    ERROR("Aborted operation because %s\n",reason);
   }
 }
 
@@ -1122,7 +1122,7 @@ static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
 	update_sampler(mc,uc);
     }
   } else {
-      DEBUG("This should never happen! Not awaiting TRAP when we expected one!\n");
+    ERROR("This should never happen! Not awaiting TRAP when we expected one!\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
     if (control_round_config) {
@@ -1174,6 +1174,9 @@ static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
       arch_set_round_config(uc,orig_round_config);
     }
     arch_reset_trap(uc,0); // best effort
+    ERROR("surprise state %d during %s (rip=%p)\n", mc->state, __func__,
+          (void *)arch_get_ip(uc));
+
     abort_operation("Cannot find monitoring context during fp_trap_handler exec");
     return;
   }
