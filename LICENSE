@@ -21,10 +21,10 @@ support is provided for this software.  It is used at your own risk.
 LICENSE
 -------
 
-This source code, "FPSpy", is 
-                
+This source code, "FPSpy", is
+
   Copyright (c) 2017 by Peter A. Dinda
-                                         
+
 
 Current version is available via:
 
@@ -39,11 +39,14 @@ display the above copyright notice when run, and include this file.
 
    1) "FPSpy" and any derivatives of "FPSpy" may only be freely used for
 non-commercial purposes.  If you are interested in commercial use of
-"FPSpy", contact Peter A. Dinda (pdinda@northwestern.edu).  
+"FPSpy", contact Peter A. Dinda (pdinda@northwestern.edu).
 
    2) Peter A. Dinda (pdinda@northwestern.edu) must be notified of any
 derivatives of "FPSpy".
 
+   3) This permission does not extend to use in a machine learning
+or AI context, for example to do training.  A separate license is needed
+for any such use of "FPVM" or its source code.
 
 In simple terms, "FPSpy" may be freely used for any non-commercial,
 purposes.  Derivatives of "FPSpy" must be similarly free and Peter
