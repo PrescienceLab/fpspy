@@ -1,4 +1,4 @@
-FPSpy Tool 
+FPSpy Tool
 ==========
 
 Copyright (c) 2017 Peter A. Dinda  Please see LICENSE file.
@@ -7,7 +7,7 @@ This is a tool for floating point exception interception and
 statistics gathering that can run underneath existing, unmodified
 binaries.
 
-FPSpy is documented in
+The initial version of FPSpy is documented in
 
 P. Dinda, A. Bernat, C. Hetland, Spying on the Floating Point Behavior
 of Existing, Unmodifed Scientific Applications, Proceedings of the
@@ -18,10 +18,54 @@ Computing (HPDC 2020), June, 2020.
 You can also see the comments in src/fpspy.c for some details of how
 this works and what it illustrates.
 
+This version includes architecture independence, with support for
+x64, arm64 (for machines with floating point traps, which are
+optional on ARM), and riscv64 (for machines with our specialized
+support for floating point traps and pipelined precise exceptions).
+
+
+Architecture Selection
+----------------------
+
+Uncomment one of the following in Makefile:
+
+ARCH=x64
+#ARCH=arm64
+#ARCH=riscv64
+
+If you are doing cross-compilation, please also configure
+PREFIX accordingly.  PREFIX will be prepended to all build tool
+names.
+
+Also source the relevant environment variable:
+
+$ source ./ENV.x64
+
+
+Configuration
+-------------
+
+fpspy/include/config.h contains configuration variables.
+Comments are provided in the file.   Probably of most note
+is CONFIG_TRAP_SHORT_CIRCUITING, which includes support
+for the x64 kernel module (if it is available on your kernel).
+and CONFIG_NO_DEBUG_OUTPUT which disables chatter.
+
+
+Kernel Module (optional x64 feature)
+------------------------------------
+
+If you wish to use the kernel module on x64 (which considerably lowers
+the cost of floating point trap delivery to FPSpy), you will need to
+compile that next and insert it.  To do so, consult
+kernel/x64/README.md
 
 
 Building and Testing
 --------------------
+
+Make sure you have sourced the relevant ENV file and modified the Makefile
+to select your target architecture.
 
 To build:
 
@@ -32,9 +76,37 @@ To test:
 
    make test
 
+You should now see a number of files with the suffix ".fpemon".   These
+are output traces captured from the test_fpspy.c program under various
+configurations.  See the Output and Analysis Scripts section for more
+information on how to decode these.
 
-Running
--------
+
+Running (simple)
+----------------
+
+If you've built FPSpy successfully, and sourced the relevant ENV file,
+you should now have a script on your path that provides a simple way to
+use FPSpy.   Suppose the program you want to run FPSpy under normally
+run as ./PROGRAM.  Then:
+
+   fpspy --aggregate ./PROGRAM
+
+will run FPSpy under it in aggregate mode, and
+
+   fpspy --individual ./PROGRAM
+
+will run FPSpy under it in individual mode.   Aggregate mode
+will capture whether any monitored FP event occurs at least once during
+the run, while individual mode will capture each instruction
+that causes a monitored FP event.
+
+
+Running (more details)
+----------------------
+
+The fpspy script is a thin veneer on top of an LD_PRELOAD library
+model with configuration by environment variables.
 
 You generally want your environment configured as follows:
 
@@ -44,9 +116,9 @@ The code has two modes of operation:
 
 - Aggregate mode simply captures the floating point exception state
   at the beginning and end of the program.  Since the exception state
-  is sticky, this will let us know if the program had 1 or more 
+  is sticky, this will let us know if the program had 1 or more
   occurances of each of the possible exceptions
-- Individual mode captures individual floating point exceptions, 
+- Individual mode captures individual floating point exceptions,
   emulating the instructions that cause them.
 
 The code can be run against a dynamically linked binary which crosses
@@ -59,7 +131,7 @@ To run against a binary:
 LD_PRELOAD=fpspy.so [FPSPY_MODE=<mode>] [FPSPY_AGGRESSIVE=<yes|no>] exec.exe
 
 The modes are "aggregate" and "individual" as noted above.   If no
-mode is given, aggregate mode is assumed.   
+mode is given, aggregate mode is assumed.
 
 Generally, FPSpy gets out of the way if the executable itself
 attempts to manipulate the FPU signaling state via the fe* and
@@ -120,7 +192,9 @@ the application is unlikely to be using.
 FPSPY_KICKSTART=y|n  (default n)
 
 If set to y, then FPSPY does not start on the initial process
-until a SIGTRAP is delivered externally.   Otherwise, it starts immediately
+until a SIGTRAP is delivered externally.   Otherwise, it starts immediately.
+This is useful under certain scenarios such as fuzzing where
+an external tool can determine a region of interest.
 
 FPSPY_ABORT=y|n  (default n)
 
@@ -189,10 +263,4 @@ analyze_individual.pl     -> create report from trace
 
 extrace_fp_event_timestamps.pl -> create time series from trace
 
-
-
-
-
-
-
-
+disassem_instr.pl         -> disassemble instruction for x64, arm64, and riscv64
