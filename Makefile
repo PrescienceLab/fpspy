@@ -1,14 +1,14 @@
 #  Part of FPSpy
 #
-#  Preload library with floating point exception interception 
+#  Preload library with floating point exception interception
 #  aggregation via FPE sticky behavior and trap-and-emulate
 #
 #  Copyright (c) 2017 Peter Dinda - see LICENSE
 #
 
-#ARCH=x64
+ARCH=x64
 #ARCH=arm64
-ARCH=riscv64
+#ARCH=riscv64
 
 # hard coded assuming we are doing cross-compilation
 ifeq ($(ARCH),riscv64)
@@ -28,7 +28,7 @@ CFLAGS_TOOL = -g -O2 -Wall -fno-strict-aliasing -Iinclude -Iinclude/$(ARCH)
 LDFLAGS_TOOL =  -lm
 
 CFLAGS_TEST = -g -O2 -Wall -fno-strict-aliasing -pthread -D$(ARCH)
-LDFLAGS_TEST =  -lm 
+LDFLAGS_TEST =  -lm
 
 CFLAGS_ROUNDING = -g -O0 -Wall -D$(ARCH)
 LDFLAGS_ROUNDING =  -lm
@@ -39,7 +39,7 @@ all: bin/$(ARCH)/fpspy.so bin/$(ARCH)/test_fpspy bin/$(ARCH)/trace_print bin/$(A
 
 
 
-bin/$(ARCH)/fpspy.so: src/fpspy.c include/*.h src/$(ARCH)/*.c src/$(ARCH)/*.S include/$(ARCH)/*.h 
+bin/$(ARCH)/fpspy.so: src/fpspy.c include/*.h src/$(ARCH)/*.c src/$(ARCH)/*.S include/$(ARCH)/*.h
 	$(CC) $(CFLAGS_FPSPY) src/fpspy.c src/$(ARCH)/*.c src/$(ARCH)/*.S $(LDFLAGS_FPSPY) -o bin/$(ARCH)/fpspy.so
 
 bin/$(ARCH)/test_fpspy: test/test_fpspy.c
@@ -105,7 +105,7 @@ test_dopey: bin/$(ARCH)/fpspy.so bin/$(ARCH)/dopey
 	-FPSPY_MODE=individual  FPSPY_DISABLE_PTHREADS=yes LD_PRELOAD=./bin/$(ARCH)/fpspy.so FPSPY_POISSON=100000:100000 FPSPY_TIMER=virtual ./bin/$(ARCH)/dopey
 
 bin/$(ARCH)/test_fpspy_rounding: test/test_fpspy_rounding.c
-	$(CC) $(CFLAGS_ROUNDING) test/test_fpspy_rounding.c $(LDFLAGS_ROUNDING) -o bin/$(ARCH)/test_fpspy_rounding 
+	$(CC) $(CFLAGS_ROUNDING) test/test_fpspy_rounding.c $(LDFLAGS_ROUNDING) -o bin/$(ARCH)/test_fpspy_rounding
 
 
 test_rounding: bin/$(ARCH)/test_fpspy_rounding
@@ -149,4 +149,3 @@ clean:
 	-rm __sleepy.*fpemon
 	-rm __dopey.*.fpemon
 	-rm bin/$(ARCH)/*dopey bin/$(ARCH)/*sleepy
-
