@@ -75,21 +75,21 @@ extern void trap_entry(void);
   Unclear how vector extensions fit into this.  
 */
 
-uint32_t riscv_get_fcsr(void)
+static uint32_t riscv_get_fcsr(void)
 {
   uint32_t fcsr;
   __asm__ __volatile__ ("frcsr %0" : "=r"(fcsr) : :);
   return fcsr;
 }
 
-uint32_t riscv_get_fflags_mask(void)
+static uint32_t riscv_get_fflags_mask(void)
 {
   uint32_t ften;
   __asm__ __volatile__ ("csrr %0, 0x880" : "=r"(ften) : :);
   return ften;
 }
 
-void riscv_set_fcsr(uint32_t f)
+static void riscv_set_fcsr(uint32_t f)
 {
   uint64_t fcsr = f & 0xffffffffUL;
   // technically this will also modify the register, writing
@@ -97,7 +97,7 @@ void riscv_set_fcsr(uint32_t f)
   __asm__ __volatile__ ("fscsr %0" : : "r"(fcsr));
 }
 
-void riscv_set_fflags_mask(uint32_t fflags_mask)
+static void riscv_set_fflags_mask(uint32_t fflags_mask)
 {
   __asm__ __volatile__ ("csrw 0x880, %0" : : "r"(fflags_mask));
 }
