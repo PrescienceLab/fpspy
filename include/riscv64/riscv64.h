@@ -118,5 +118,24 @@ void arch_process_deinit(void);
 int  arch_thread_init(ucontext_t *uc);
 void arch_thread_deinit(void);
 
+extern void trap_entry(void);
+
+struct delegate_config_t {
+  unsigned int en_flag;
+  unsigned long trap_mask;
+};
+
+#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#include <fcntl.h>
+#include "riscv64.h"
+#include <sys/ioctl.h>
+#define PIPELINED_DELEGATE_HELLO_WORLD 0x4630
+#define PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET 0x80084631
+#define PIPELINED_DELEGATE_DELEGATE_TRAPS 0x80084632
+#define PIPELINED_DELEGATE_CSR_STATUS 0x4633
+#define PIPELINED_DELEGATE_FILE "/dev/pipelined-delegate"
+
+void init_pipelined_exceptions(void);
+#endif
 
 #endif
