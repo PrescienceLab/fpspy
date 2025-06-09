@@ -118,11 +118,5 @@ void arch_process_deinit(void);
 int  arch_thread_init(ucontext_t *uc);
 void arch_thread_deinit(void);
 
-/* FIXME: This is a leaky abstraction! Put the PPE stuff in risv.c and re-mark
- * these functions as static! */
-uint32_t riscv_get_fcsr(void);
-uint32_t riscv_get_fflags_mask(void);
-void riscv_set_fcsr(uint32_t f);
-void riscv_set_fflags_mask(uint32_t f);
 
 #endif
