@@ -12,18 +12,7 @@
 #include "fpspy.h"
 #include "debug.h"
 #include "arch.h"
-
-
-#if defined(riscv64) && CONFIG_TRAP_PIPELINED_EXCEPTIONS
-#include <fcntl.h>
 #include "riscv64.h"
-#include <sys/ioctl.h>
-#define PIPELINED_DELEGATE_HELLO_WORLD 0x4630
-#define PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET 0x80084631
-#define PIPELINED_DELEGATE_DELEGATE_TRAPS 0x80084632
-#define PIPELINED_DELEGATE_CSR_STATUS 0x4633
-#define PIPELINED_DELEGATE_FILE "/dev/pipelined-delegate"
-#endif
 
 extern void trap_entry(void);
 
@@ -591,14 +580,6 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
 // Entry point for FP Trap with pipelined exceptions on RISC-V
 //
 #if CONFIG_TRAP_PIPELINED_EXCEPTIONS
-// this is currently completely riscv64-specific
-
-extern void trap_entry(void);
-
-struct delegate_config_t {
-  unsigned int en_flag;
-  unsigned long trap_mask;
-};
 
 void init_pipelined_exceptions(void) {
   int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
