@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "fpspy.h"
 #include "debug.h"
 #include "arch.h"
 
