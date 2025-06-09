@@ -81,6 +81,7 @@
 #include <execinfo.h>
 
 #include "config.h"
+#include "fpspy.h"
 #include "debug.h"
 #include "arch.h"
 #include "trace_record.h"
@@ -501,7 +502,7 @@ static __attribute__((constructor)) void fpspy_init(void);
 //
 // Abort operation is invoked whenever FPSpy needs to "get out of the way"
 //
-static void abort_operation(char *reason)
+void abort_operation(char *reason)
 {
   if (!inited) {
     ERROR("Initializing before aborting\n");
@@ -1060,7 +1061,7 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc)
 // Other circumstances require an abort or are part of an abort,
 // except for when we catch a breakpoint trap  in INIT state, in which case,
 // this is deferred startup for the thread
-static void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
+void brk_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
@@ -1159,7 +1160,7 @@ static void sigtrap_handler(int sig, siginfo_t *si, void *priv)
 // FPSpy gets here when the current instruction is a FP instruction that
 // has generated an FP trap we care about.
 // This should only happen in the AWAIT_FPE state.
-static void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
+void fp_trap_handler(siginfo_t *si, ucontext_t *uc)
 {
   if (abort_on_fpe) {
     abort();

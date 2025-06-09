@@ -5,11 +5,11 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <ucontext.h>
-#include <asm/sigcontext.h>
 #include <fenv.h>
 #include <string.h>
 
 #include "config.h"
+#include "fpspy.h"
 #include "debug.h"
 #include "arch.h"
 
