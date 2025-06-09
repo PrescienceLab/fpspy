@@ -136,6 +136,15 @@ struct delegate_config_t {
 #define PIPELINED_DELEGATE_FILE "/dev/pipelined-delegate"
 
 void init_pipelined_exceptions(void);
+
+#define PPE_TRAP_MASK (1 << EXC_FLOATING_POINT)
+
+#if CONFIG_RISCV_USE_ESTEP
+#undef PPE_TRAP_MASK
+#define PPE_TRAP_MASK (1 << EXC_FLOATING_POINT) | (1 << EXC_INSTRUCTION_STEP)
+#else
+#endif
+
 #endif
 
 #endif

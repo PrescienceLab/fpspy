@@ -584,8 +584,8 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
 void init_pipelined_exceptions(void) {
   int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
   struct delegate_config_t config = {
-      .en_flag = 1,
-      .trap_mask = (1 << 0x18) | (1 << 0x19),
+    .en_flag = 1,
+    .trap_mask = PPE_TRAP_MASK,
   };
 
   DEBUG("Installing %s (0x%016lx) as pipelined delegation handler\n",
