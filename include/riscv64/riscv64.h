@@ -5,7 +5,7 @@
 #define EXC_INSTRUCTION_STEP 0x19
 
 typedef union  {
-  uint64_t val; 
+  uint64_t val;
   struct {
     uint8_t nx:1;   // detected rounding
     uint8_t uf:1;   // detected underflow
@@ -63,7 +63,7 @@ static inline uint64_t __attribute__((always_inline)) arch_cycle_count(void)
 
 // the DENORM trap is NOT available on riscv, though we could add it...
 // it's included here so that the user can ask about it via
-// the special exception query interface 
+// the special exception query interface
 #define  FE_DENORM 0x1000
 void arch_clear_trap_mask(void);
 void arch_set_trap_mask(int which);
@@ -111,7 +111,7 @@ uint64_t arch_get_sp(const ucontext_t *uc);
 
 int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size);
 
-  
+
 int  arch_process_init(void);
 void arch_process_deinit(void);
 

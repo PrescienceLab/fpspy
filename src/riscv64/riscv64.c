@@ -14,6 +14,19 @@
 #include "arch.h"
 
 
+#if defined(riscv64) && CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#include <fcntl.h>
+#include "riscv64.h"
+#include <sys/ioctl.h>
+#define PIPELINED_DELEGATE_HELLO_WORLD 0x4630
+#define PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET 0x80084631
+#define PIPELINED_DELEGATE_DELEGATE_TRAPS 0x80084632
+#define PIPELINED_DELEGATE_CSR_STATUS 0x4633
+#define PIPELINED_DELEGATE_FILE "/dev/pipelined-delegate"
+#endif
+
+extern void trap_entry(void);
+
 /*
   We will handle only 64 bit riscv, though this should 
   work fine for 32 bit as well.
@@ -573,6 +586,194 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc)
 
   return f.val;
 }
+
+//
+// Entry point for FP Trap with pipelined exceptions on RISC-V
+//
+#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+// this is currently completely riscv64-specific
+
+extern void trap_entry(void);
+
+struct delegate_config_t {
+  unsigned int en_flag;
+  unsigned long trap_mask;
+};
+
+void init_pipelined_exceptions(void) {
+  int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
+  struct delegate_config_t config = {
+      .en_flag = 1,
+      .trap_mask = (1 << 0x18) | (1 << 0x19),
+  };
+
+  DEBUG("Installing %s (0x%016lx) as pipelined delegation handler\n",
+        "trap_entry", (uintptr_t) trap_entry);
+
+  ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
+  ioctl(fd, PIPELINED_DELEGATE_DELEGATE_TRAPS, &config);
+  /* NOTE: You must leave the pipelined delegation character device open for the
+   * ENTIRE lifetime of the process. Closing the character device resets the
+   * core's delegation registers to a default state! */
+}
+
+// note that unlike FPVM, the handler WILL NOT and MUST NOT
+// change any state except for possibly changing
+// rflags.TF and mxcsr.trap bits
+//
+// See src/riscv64/user_fpspy_entry.S for a layout of
+// the stack and what priv points to on entry.  The summary is
+// that priv is pointing to all of the int registers that have
+// been saved on the stack on entry into the handler.
+// return value is the PC of next instruction
+static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc)
+{
+  // Build up a sufficiently detailed ucontext_t and
+  // call the shared handler.  Copy in/out the FP and GP
+  // state
+  DEBUG("%s (0x%016lx): PPE Handling FPE! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t)ppe_fpe_handler);
+
+  siginfo_t fake_siginfo = {0};
+  ucontext_t fake_ucontext = {0};
+  arch_fp_csr_t old_fcsr;
+
+  arch_get_machine_fp_csr(&old_fcsr);
+  uint64_t fcsr = old_fcsr.val & 0xffffffffUL;
+
+  uint32_t err = fcsr & 0x1f;
+  if (err == 0x10) {	/* Invalid op (NaN)*/
+    fake_siginfo.si_code = FPE_FLTINV;
+  } else if (err == 0x08) { /* Divide by Zero */
+    fake_siginfo.si_code = FPE_FLTDIV;
+  } else if (err == 0x05) { /* Overflow */
+    fake_siginfo.si_code = FPE_FLTOVF;
+  } else if (err == 0x03) { /* Underflow */
+    fake_siginfo.si_code = FPE_FLTUND;
+  } else if (err == 0x01) { /* Precision */
+    fake_siginfo.si_code = FPE_FLTRES;
+  }
+
+  siginfo_t *si = (siginfo_t *)&fake_siginfo;
+
+#if USE_MEMCPY
+  memcpy(fake_ucontext.uc_mcontext.__gregs, priv, NGREG * sizeof(fake_ucontext.uc_mcontext.__gregs[0]));
+#else
+  for (int i = REG_PC; i < REG_PC + NGREG; i++) {
+      fake_ucontext.uc_mcontext.__gregs[i] = ((greg_t*)priv)[i];
+  }
+#endif
+
+  /* XXX: We assume RISC-V D extension here! */
+  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = fcsr;
+
+  ucontext_t *uc = (ucontext_t *)&fake_ucontext;
+
+  uint8_t *pc = (uint8_t*) uc->uc_mcontext.__gregs[REG_PC];
+
+  DEBUG(
+  "PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n",
+  si->si_signo, si->si_errno, si->si_code, si->si_addr, *(uint32_t*)pc);
+  DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
+
+  if (log_level > 1) {
+    char buf[80];
+
+    switch (si->si_code) {
+      case FPE_FLTDIV : strcpy(buf, "FPE_FLTDIV"); break;
+      case FPE_FLTINV : strcpy(buf, "FPE_FLTINV"); break;
+      case FPE_FLTOVF : strcpy(buf, "FPE_FLTOVF"); break;
+      case FPE_FLTUND : strcpy(buf, "FPE_FLTUND"); break;
+      case FPE_FLTRES : strcpy(buf, "FPE_FLTRES"); break;
+      case FPE_FLTSUB : strcpy(buf, "FPE_FLTSUB"); break;
+      case FPE_INTDIV : strcpy(buf, "FPE_INTDIV"); break;
+      case FPE_INTOVF : strcpy(buf, "FPE_INTOVF"); break;
+    default:
+      sprintf(buf, "UNKNOWN(0x%x)\n",si->si_code);
+      break;
+    }
+
+    DEBUG("FPE exceptions %s\n", buf);
+
+  }
+
+  fp_trap_handler(si,uc);
+
+  /* XXX: We assume D extension here! */
+  /* Restore the FCSR's FP event bits. */
+  riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
+
+  DEBUG("PPE-FPE  done\n");
+
+  return epc;
+}
+
+/* ESTEPs are a pipeline-able exception cause that has been added to RISC-V for
+ * the express purpose of being delegable. In theory, breakpoints could be
+ * pipeline delegated too, but that would interfere with traditional dbugging
+ * tools, like GDB or Valgrind. In an effort to make things behave like people
+ * would expect, we introduced ESTEP, which is IDENTICAL to EBREAK, except for
+ * the fact that no external software (GDB) will issue an ESTEP instruction. */
+
+/* Like the PPE FPE handler above, we construct a fake siginfo_t and ucontext_t
+ * structs so that the arch-independent code works seamlessly.
+ * When handling an ESTEP, this was intended to REPLACE the instruction
+ * immediately AFTER the FP instruction. So we need to clean up and return the
+ * original instruction, along with returning a set of FP flags that make sense
+ * for the instruction we just executed. */
+static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
+  DEBUG("%s (0x%016lx): PPE Handling ESTEP! Building fake siginfo & ucontext\n",
+        __func__, (uintptr_t) ppe_estep_handler);
+  siginfo_t fake_siginfo = {0};
+  ucontext_t fake_ucontext = {0};
+
+  siginfo_t *si = (siginfo_t *)&fake_siginfo;
+
+#if USE_MEMCPY
+  memcpy(fake_ucontext.uc_mcontext.__gregs, real_gregs,
+         NGREG * sizeof(fake_ucontext.uc_mcontext.__gregs[0]));
+#else
+  for (int i = REG_PC; i < REG_PC + NGREG; i++) {
+    fake_ucontext.uc_mcontext.__gregs[i] = ((greg_t*)real_gregs)[i];
+  }
+#endif
+
+  fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr = riscv_get_fcsr();
+
+  monitoring_context_t *mc = find_monitoring_context(gettid());
+
+  /* NOTE: skip_estep MUST come before brk_trap_handler! */
+  int skip_estep = mc && mc->state==INIT;
+  brk_trap_handler(si, &fake_ucontext);
+
+  /* Restore the FCSR's FP event bits. */
+  riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
+
+  DEBUG("PPE ESTEP done\n");
+
+  return skip_estep ? epc + 4 : epc;
+}
+
+// this is where the pipelined exception will land, and we will dispatch
+// to the fpspy_short_circuit_handler
+uintptr_t handle_ppe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
+  DEBUG("%s (0x%016lx): Handling pipelined trap\n",
+        __func__, (uintptr_t) handle_ppe);
+  void *real_gregs = (void *)regs;
+  switch (cause) {
+  case EXC_FLOATING_POINT:
+    epc = ppe_fpe_handler(real_gregs, epc);
+    break;
+  case EXC_INSTRUCTION_STEP:
+    epc = ppe_estep_handler(real_gregs, epc);
+    break;
+  default:
+    abort_operation("Received unexpected trap cause!");
+    break;
+  }
+  return epc;
+}
+#endif
 
 /*
   The following is done because single step mode is typically not available for 
