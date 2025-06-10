@@ -23,128 +23,118 @@
 #define NUM_THREADS 1
 
 // does show up in unistd for some reason...
-int execvpe(char *, char **, char **); 
+int execvpe(char *, char **, char **);
 
 void use(double x);
 
 
-void divzero()
-{
-  volatile double x,y,z;
-  
-  x=99.0;
-  y=0.0;
+void divzero() {
+  volatile double x, y, z;
+
+  x = 99.0;
+  y = 0.0;
   printf("Doing divide by zero\n");
-  z = x/y;
+  z = x / y;
   use(z);
-  printf("%.18le / %.18le = %.18le\n", x,y,z);
+  printf("%.18le / %.18le = %.18le\n", x, y, z);
 }
 
-void nanny()
-{
-  volatile double x,y,z;
-  
-  x=0.0;
-  y=0.0;
+void nanny() {
+  volatile double x, y, z;
+
+  x = 0.0;
+  y = 0.0;
   printf("Doing NAN\n");
-  z = x/y;
+  z = x / y;
   use(z);
-  printf("%.18le / %.18le = %.18le\n", x,y,z);
+  printf("%.18le / %.18le = %.18le\n", x, y, z);
 }
 
 
-void denorm()
-{
-  volatile double x,y,z;
+void denorm() {
+  volatile double x, y, z;
   unsigned long val;
   // largest denormal number
   // 0 00000000000 111111...
-  // all 1s 
-  val =  0x000fffffffffffffULL;
-  x=*(double*)&val;
-  y=4.0;
+  // all 1s
+  val = 0x000fffffffffffffULL;
+  x = *(double *)&val;
+  y = 4.0;
   printf("Doing denorm\n");
-  z = x/y;
+  z = x / y;
   use(z);
-  printf("%.18le / %.18le = %.18le\n", x,y,z);
+  printf("%.18le / %.18le = %.18le\n", x, y, z);
 }
 
-void underflow()
-{
-  volatile double x,y,z;
+void underflow() {
+  volatile double x, y, z;
   unsigned long val;
   // smallest normal number
   // 0 00000000001 00000000000....1
   // all zero except for bit 52
-  val =  0x0010000000000001ULL;
-  x=*(double*)&val;
-  y=x;
+  val = 0x0010000000000001ULL;
+  x = *(double *)&val;
+  y = x;
   printf("Doing underflow\n");
-  z = x*y;
+  z = x * y;
   use(z);
-  printf("%.18le / %.18le = %.18le\n", x,y,z);
+  printf("%.18le / %.18le = %.18le\n", x, y, z);
 }
 
-void overflow()
-{
-  volatile double x,y,z;
+void overflow() {
+  volatile double x, y, z;
   unsigned long val;
   // largest normal number
   // 0 1111111110 11111111...
-  // all 1s except for bit 52 
-  val =  0x7fefffffffffffffULL;
-  x=*(double*)&val;
-  y=4.0;
+  // all 1s except for bit 52
+  val = 0x7fefffffffffffffULL;
+  x = *(double *)&val;
+  y = 4.0;
   printf("Doing overflow\n");
-  z = x*y;
+  z = x * y;
   use(z);
-  printf("%.18le * %.18le = %.18le\n", x,y,z);
-}  
+  printf("%.18le * %.18le = %.18le\n", x, y, z);
+}
 
-void inexact()
-{
-  volatile double x,y,z;
+void inexact() {
+  volatile double x, y, z;
   unsigned long val;
   // largest normal number
   // 0 1111111110 11111111...
-  // all 1s except for bit 52 
-  val =  0x7fefffffffffffffULL;
-  x=*(double*)&val;
+  // all 1s except for bit 52
+  val = 0x7fefffffffffffffULL;
+  x = *(double *)&val;
   // normal number with smallest exponent, biggest mantissa
   // 0 00000000001 11111....
-  // all 0s except for bit 52..0 
-  val =  0x001fffffffffffffULL;
-  y=*(double*)&val;
+  // all 0s except for bit 52..0
+  val = 0x001fffffffffffffULL;
+  y = *(double *)&val;
   printf("Doing inexact\n");
-  z = x-y;
+  z = x - y;
   use(z);
-  printf("%.18le - %.18le = %.18le\n", x,y,z);
-}  
-
-
-void use(double x)
-{
+  printf("%.18le - %.18le = %.18le\n", x, y, z);
 }
 
-void handler(int sig)
-{
-  printf("Caught my own signal %d and am exiting\n",sig);
+
+void use(double x) {}
+
+void handler(int sig) {
+  printf("Caught my own signal %d and am exiting\n", sig);
   exit(0);
 }
 
-int do_work()
-{
+int do_work() {
   divzero();
   nanny();
   denorm();
 
   // if we abort here, we should have some partial output in the logs
-  
+
   if (getenv("TEST_FPSPY_BREAK_GENERAL_SIGNAL")) {
-    signal(SIGUSR1,handler);
+    signal(SIGUSR1, handler);
   }
   if (getenv("TEST_FPSPY_BREAK_FPE_SIGNAL")) {
-    signal(SIGFPE,handler);
+    signal(SIGFPE, handler);
   }
   if (getenv("TEST_FPSPY_BREAK_FE_FUNC")) {
     feclearexcept(FE_ALL_EXCEPT);
@@ -159,23 +149,22 @@ int do_work()
 
 
 
-void *thread_start(void *tid)
-{
-  printf("Running tests in spawned thread %d\n",(int)(long)tid);
+void *thread_start(void *tid) {
+  printf("Running tests in spawned thread %d\n", (int)(long)tid);
   do_work();
   return 0;
 }
 
-int main(int argc, char *argv[], char *envp[])
-{
+int main(int argc, char *argv[], char *envp[]) {
   int pid;
   pthread_t tid[NUM_THREADS];
   int rc;
-  int am_child = argc>1 && !strcasecmp(argv[1],"child");
+  int am_child = argc > 1 && !strcasecmp(argv[1], "child");
   int i;
-  
+
   if (am_child) {
-    printf("Forked/execed child running tests\n"); fflush(stdout);
+    printf("Forked/execed child running tests\n");
+    fflush(stdout);
     do_work();
     return 0;
   }
@@ -186,42 +175,44 @@ int main(int argc, char *argv[], char *envp[])
 
   printf("Forking child to run tests\n");
   pid = fork();
-  if (pid<0) {
+  if (pid < 0) {
     perror("fork failed");
     return -1;
-  } else if (pid==0) {
+  } else if (pid == 0) {
     // child
-    printf("Running tests in forked child\n"); fflush(stdout);
+    printf("Running tests in forked child\n");
+    fflush(stdout);
     do_work();
     return 0;
-  } else { // pid>0 => parent
+  } else {  // pid>0 => parent
     do {
-      if (waitpid(pid,&rc,0)<0) {
-	perror("wait failed");
-	return -1;
+      if (waitpid(pid, &rc, 0) < 0) {
+        perror("wait failed");
+        return -1;
       }
-    } while (!WIFEXITED(rc)); // we only care about signals it caught, just an exit
+    } while (!WIFEXITED(rc));  // we only care about signals it caught, just an exit
     printf("forked child done.\n");
   }
 
-  printf("Forking/execing child to run tests\n"); fflush(stdout);
+  printf("Forking/execing child to run tests\n");
+  fflush(stdout);
   pid = fork();
-  if (pid<0) {
+  if (pid < 0) {
     perror("fork failed");
     return -1;
-  } else if (pid==0) {
+  } else if (pid == 0) {
     // child
-    char *argv_child[] = { argv[0], "child", 0 };
-    execvpe(argv_child[0],argv_child,envp);  // pass environment to child
+    char *argv_child[] = {argv[0], "child", 0};
+    execvpe(argv_child[0], argv_child, envp);  // pass environment to child
     perror("exec failed...");
     return -1;
-  } else { // pid>0 => parent
+  } else {  // pid>0 => parent
     do {
-      if (waitpid(pid,&rc,0)<0) {
-	perror("wait failed");
-	return -1;
+      if (waitpid(pid, &rc, 0) < 0) {
+        perror("wait failed");
+        return -1;
       }
-    } while (!WIFEXITED(rc)); // we only care about signals it caught, just an exit
+    } while (!WIFEXITED(rc));  // we only care about signals it caught, just an exit
     if (WEXITSTATUS(rc)) {
       printf("forked child failed (rc=%d)\n", WEXITSTATUS(rc));
       return -1;
@@ -229,16 +220,17 @@ int main(int argc, char *argv[], char *envp[])
     printf("forked child with exec done.\n");
   }
 
-  printf("Spawning %d threads to run tests\n", NUM_THREADS); fflush(stdout);
-  for (i=0;i<NUM_THREADS;i++) {
-    if (pthread_create(&tid[i],0,thread_start,(void*)(long)i)) {
+  printf("Spawning %d threads to run tests\n", NUM_THREADS);
+  fflush(stdout);
+  for (i = 0; i < NUM_THREADS; i++) {
+    if (pthread_create(&tid[i], 0, thread_start, (void *)(long)i)) {
       perror("thread creation failed");
       return -1;
     }
   }
-  
-  for (i=0;i<NUM_THREADS;i++) {
-    pthread_join(tid[i],0);
+
+  for (i = 0; i < NUM_THREADS; i++) {
+    pthread_join(tid[i], 0);
     printf("Joined thread %d\n", i);
   }
 
@@ -247,6 +239,3 @@ int main(int argc, char *argv[], char *envp[])
   printf("Goodbye from test_fpspy\n");
   return 0;
 }
-  
-
-

@@ -100,7 +100,8 @@ int main() {
   printf("trial,hw_to_kernel,kernel_to_user,total,slack\n");
   for (int i = 0; i < N; i++) {
     struct result r = results[i];
-    printf("%d, %zu, %zu, %zu, %zu\n", i, r.hw_to_kernel, r.kernel_to_user, r.total, r.total - (r.kernel_to_user + r.hw_to_kernel));
+    printf("%d, %zu, %zu, %zu, %zu\n", i, r.hw_to_kernel, r.kernel_to_user, r.total,
+        r.total - (r.kernel_to_user + r.hw_to_kernel));
   }
 
   return 0;

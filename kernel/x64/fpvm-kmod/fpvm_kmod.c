@@ -94,13 +94,9 @@ static struct user_proc_info *upi_find(pid_t target_pid) {
   return NULL;
 }
 
-static void upi_add(struct user_proc_info *upi) {
-  list_add(&upi->node, &upi_list);
-}
+static void upi_add(struct user_proc_info *upi) { list_add(&upi->node, &upi_list); }
 
-static void upi_del(struct user_proc_info *upi) {
-  list_del(&upi->node);
-}
+static void upi_del(struct user_proc_info *upi) { list_del(&upi->node); }
 
 
 
@@ -184,9 +180,7 @@ Device Driver Stuff
 static struct cdev fpvm_cdev;
 static struct class *fpvm_class;
 
-static int fpvm_open(struct inode *inode, struct file *file) {
-  return 0;
-}
+static int fpvm_open(struct inode *inode, struct file *file) { return 0; }
 
 static int fpvm_release(struct inode *inode, struct file *file) {
   fpvm_remove_handlers(current->pid);

@@ -28,9 +28,9 @@ void nanny() {
 void use(double x) {}
 
 int main(int argc, char *argv[], char *envp[]) {
-  #ifdef DELEGATE_TRAPS
+#ifdef DELEGATE_TRAPS
   enable_delegation();
-  #endif
+#endif
   nanny();
 
   return 0;
