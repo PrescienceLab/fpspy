@@ -1,6 +1,6 @@
 //  Part of FPSpy
 //
-//  Preload library with floating point exception interception 
+//  Preload library with floating point exception interception
 //  aggregation via FPE sticky behavior and trap-and-emulate
 //
 //  Copyright (c) 2018 Peter A. Dinda - see LICENSE
@@ -13,18 +13,17 @@
 #include "trace_record.h"
 
 typedef struct trace {
-  uint64_t                   numrecs;
+  uint64_t numrecs;
   individual_trace_record_t *rec;
-  int                        fd;
+  int fd;
 } trace_t;
 
 trace_t *trace_attach(char *file);
-void     trace_detach(trace_t *trace);
+void trace_detach(trace_t *trace);
 
-int      trace_map(char *file, void (*filter)(individual_trace_record_t *, void *), void *);
+int trace_map(char *file, void (*filter)(individual_trace_record_t *, void *), void *);
 
 // select = 0 => all
-int      trace_print(char *file, FILE *dest, int (*select)(individual_trace_record_t *));
+int trace_print(char *file, FILE *dest, int (*select)(individual_trace_record_t *));
 
 #endif
-

@@ -42,4 +42,4 @@ uintptr_t handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
   return epc + 4;
 }
 
-#endif //__UTIL_H
+#endif  //__UTIL_H
