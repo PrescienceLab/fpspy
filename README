@@ -27,17 +27,7 @@ support for floating point traps and pipelined precise exceptions).
 Architecture Selection
 ----------------------
 
-Uncomment one of the following in Makefile:
-
-ARCH=x64
-#ARCH=arm64
-#ARCH=riscv64
-
-If you are doing cross-compilation, please also configure
-PREFIX accordingly.  PREFIX will be prepended to all build tool
-names.
-
-Also source the relevant environment variable:
+Source the relevant environment variable:
 
 $ source ./ENV.x64
 
@@ -45,11 +35,13 @@ $ source ./ENV.x64
 Configuration
 -------------
 
-fpspy/include/config.h contains configuration variables.
-Comments are provided in the file.   Probably of most note
-is CONFIG_TRAP_SHORT_CIRCUITING, which includes support
-for the x64 kernel module (if it is available on your kernel).
-and CONFIG_NO_DEBUG_OUTPUT which disables chatter.
+Create a default configuration
+
+$ make defconfig
+
+Update your configuration
+
+$ make menuconfig
 
 
 Kernel Module (optional x64 feature)
@@ -64,8 +56,8 @@ kernel/x64/README.md
 Building and Testing
 --------------------
 
-Make sure you have sourced the relevant ENV file and modified the Makefile
-to select your target architecture.
+Make sure you have sourced the relevant ENV file and modified the
+configuration as appropriate.
 
 To build:
 
