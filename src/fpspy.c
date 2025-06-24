@@ -181,11 +181,14 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int, oldsa_alrm;
   }
 #define ORIG_IF_CAN(func, ...)                        \
   if (orig_##func) {                                  \
-    __auto_type rc = orig_##func(__VA_ARGS__);        \
+    __auto_type __attribute__((unused)) rc  = orig_##func(__VA_ARGS__);	\
     DEBUG("orig_" #func " returns 0x%x\n", rc);       \
   } else {                                            \
     DEBUG("cannot call orig_" #func " - skipping\n"); \
   }
+
+// For use in debugging
+//
 // #define SHOW_CALL_STACK() DEBUG("callstack (3 deep) : %p -> %p -> %p\n",
 // __builtin_return_address(3), __builtin_return_address(2), __builtin_return_address(1)) #define
 // SHOW_CALL_STACK() DEBUG("callstack (2 deep) : %p -> %p\n", __builtin_return_address(2),
@@ -210,7 +213,7 @@ static struct sigaction oldsa_fpe, oldsa_trap, oldsa_int, oldsa_alrm;
 //
 
 static int context_lock;
-static monitoring_context_t context[MAX_CONTEXTS];
+static monitoring_context_t context[CONFIG_MAX_CONTEXTS];
 
 
 
@@ -230,7 +233,7 @@ static void unlock_contexts() { __sync_and_and_fetch(&context_lock, 0); }
 monitoring_context_t *find_monitoring_context(int tid) {
   int i;
   lock_contexts();
-  for (i = 0; i < MAX_CONTEXTS; i++) {
+  for (i = 0; i < CONFIG_MAX_CONTEXTS; i++) {
     if (context[i].tid == tid) {
       unlock_contexts();
       return &context[i];
@@ -243,7 +246,7 @@ monitoring_context_t *find_monitoring_context(int tid) {
 static monitoring_context_t *alloc_monitoring_context(int tid) {
   int i;
   lock_contexts();
-  for (i = 0; i < MAX_CONTEXTS; i++) {
+  for (i = 0; i < CONFIG_MAX_CONTEXTS; i++) {
     if (!context[i].tid) {
       context[i].tid = tid;
       unlock_contexts();
@@ -257,7 +260,7 @@ static monitoring_context_t *alloc_monitoring_context(int tid) {
 static void free_monitoring_context(int tid) {
   int i;
   lock_contexts();
-  for (i = 0; i < MAX_CONTEXTS; i++) {
+  for (i = 0; i < CONFIG_MAX_CONTEXTS; i++) {
     if (context[i].tid == tid) {
       context[i].tid = 0;
       unlock_contexts();
@@ -941,14 +944,14 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc) {
     n = 1;
   }
 
-  if (s->state == OFF && n > MAX_US_ON) {
+  if (s->state == OFF && n > CONFIG_MAX_US_ON) {
     // about to turn on for too long, limit:
-    n = MAX_US_ON;
+    n = CONFIG_MAX_US_ON;
   }
 
-  if (s->state == ON && n > MAX_US_OFF) {
+  if (s->state == ON && n > CONFIG_MAX_US_OFF) {
     // about to turn off for too long, limit:
-    n = MAX_US_OFF;
+    n = CONFIG_MAX_US_OFF;
   }
 
   s->it.it_interval.tv_sec = 0;
@@ -988,7 +991,6 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
   if (!mc || mc->state == ABORT) {
-    DEBUG("We reached something that should never happen in brk_trap_handler\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
     if (control_round_config) {
@@ -1005,7 +1007,6 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
   }
 
   if (mc && mc->state == INIT) {
-    DEBUG("We only expect to hit this brk_trap_handler thing once!\n");
     if (arch_thread_init(uc)) {
       // bad news, probably...
       abort_operation("failed to setup thread for architecture\n");
@@ -1023,7 +1024,6 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
   }
 
   if (mc->state == AWAIT_TRAP) {
-    DEBUG("COMMON case for brk_trap_handler\n");
     mc->count++;
     arch_clear_fp_exceptions(uc);
     if (maxcount != -1 && mc->count >= maxcount) {
@@ -1045,7 +1045,6 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
       update_sampler(mc, uc);
     }
   } else {
-    ERROR("This should never happen! Not awaiting TRAP when we expected one!\n");
     arch_clear_fp_exceptions(uc);
     arch_mask_fp_traps(uc);
     if (control_round_config) {
@@ -1102,7 +1101,6 @@ void fp_trap_handler(siginfo_t *si, ucontext_t *uc) {
 
   if (!(mc->count % sample_period)) {
     individual_trace_record_t r;
-
     r.time = arch_cycle_count() - mc->start_time;
     r.rip = (void *)arch_get_ip(uc);
     r.rsp = (void *)arch_get_sp(uc);
@@ -1208,8 +1206,8 @@ static void sigfpe_handler(int sig, siginfo_t *si, void *priv) {
 static void memfault_handler(int sig, siginfo_t *si, void *priv) {
   ucontext_t *uc = (ucontext_t *)priv;
   void *ip = (void *)arch_get_ip(uc);
-  void *sp = (void *)arch_get_sp(uc);
-  void *addr = si->si_addr;
+  void __attribute__((unused)) *sp = (void *)arch_get_sp(uc);
+  void __attribute__((unused)) *addr = si->si_addr;
 
   DEBUG("%s ip=%p sp=%p addr=%p reason: %d (%s)\n",
       sig == SIGSEGV  ? "SIGSEGV"
@@ -1678,15 +1676,6 @@ static int bringup() {
     }
   }
 
-  arch_fp_csr_t f;
-  arch_get_machine_fp_csr(&f);
-#if ARM
-  DEBUG("machine fpcr=%016lx fpsr=%016lx\n", f.fpcr.val, f.fpsr.val);
-#endif
-#if x64
-  DEBUG("machine fpcsr=%08x\n", f.val);
-#endif
-
   inited = 1;
   DEBUG("Done with setup\n");
   return 0;
@@ -1958,7 +1947,7 @@ static __attribute__((destructor)) void fpspy_deinit(void) {
       teardown_monitoring_context(gettid());
       int i;
       DEBUG("FPE exceptions previously dumped to files - now closing them\n");
-      for (i = 0; i < MAX_CONTEXTS; i++) {
+      for (i = 0; i < CONFIG_MAX_CONTEXTS; i++) {
         if (context[i].tid) {
           close(context[i].fd);
         }
