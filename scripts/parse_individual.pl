@@ -7,7 +7,7 @@
 #
 
 
-$#ARGV<=1 or die "usage: parse_individual.pl file [arch]\n";
+$#ARGV==0 or die "usage: parse_individual.pl file\n";
 
 %decode = ( 1 => "FPE_INTDIV",
 	    2 => "FPE_INTOVF",

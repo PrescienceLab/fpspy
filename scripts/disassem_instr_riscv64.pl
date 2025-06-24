@@ -41,11 +41,11 @@ sub doit {
 
     close(S);
 
-    system("rm -f __test.o && gcc -c __test.S -o __test.o");
+    system("rm -f __test.o && $GCC -c __test.S -o __test.o");
 
     # this only works on a "-D" on ARM for some reason I cannot
     # fathom... so, assuming same issue here...
-    open(D,"objdump -D __test.o |") or die "can't disassemble\n";
+    open(D,"$OBJ -D __test.o |") or die "can't disassemble\n";
 
     while (my $l=<D>) {
 	chomp($l);
@@ -56,6 +56,7 @@ sub doit {
 
 	    $instr=~s/\t/ /g;
 #	    print "outhex=$outhex, instr=$instr\n";
+
 	    return ($outhex,$instr);
 	}
     }
