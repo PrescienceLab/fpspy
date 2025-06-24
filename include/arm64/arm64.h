@@ -134,6 +134,8 @@ typedef union {
 typedef pstate_t arch_gp_csr_t;
 
 
+// note that without EL0 access this is not very useful for
+// short tests, since the times will be always about the same.
 static inline uint64_t __attribute__((always_inline)) arch_cycle_count(void) {
 #if HAVE_EL0_COUNTER_ACCESS
   uint64_t val;

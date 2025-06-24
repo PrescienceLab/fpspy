@@ -584,6 +584,9 @@ int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size) {
 
 // representation is as 2 back to back 32 bit regs
 // FPCR : FPSR
+//
+// When used in a trace record, this should end up
+// with "mxcsr" being fpsr... yet it doesn't...
 uint64_t arch_get_fp_csr(const ucontext_t *uc) {
   arch_fp_csr_t f;
 
@@ -592,7 +595,7 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc) {
     return -1;
   }
 
-  return (f.fpcr.val << 32) | (f.fpsr.val & 0xffffffff);
+  return (f.fpcr.val << 32) | (f.fpsr.val & 0xffffffffUL);
 }
 
 /*
