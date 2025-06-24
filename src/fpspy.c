@@ -1344,7 +1344,7 @@ void fpspy_short_circuit_handler(void *priv) {
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
 
-  uint8_t *rip = (uint8_t *)uc->uc_mcontext.gregs[REG_RIP];
+  uint8_t __attribute__((unused)) *rip = (uint8_t *)uc->uc_mcontext.gregs[REG_RIP];
 
   DEBUG(
       "SCFPE signo 0x%x errno 0x%x code 0x%x rip %p %02x %02x %02x %02x %02x "
