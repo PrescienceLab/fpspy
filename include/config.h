@@ -8,11 +8,11 @@
 #define MAX_CONTEXTS 1024
 
 
-// support for FPVM kernel module
+// support for FPVM kernel module - currently x64 only
 #define CONFIG_TRAP_SHORT_CIRCUITING 0
 
 #if !defined(x64) && CONFIG_TRAP_SHORT_CIRCUITING
-#warning Disabling short circuiting as it is not available on this architecture
+//#warning Disabling trap short-circuiting as it is not available on this architecture
 #undef CONFIG_TRAP_SHORT_CIRCUITING
 #define CONFIG_TRAP_SHORT_CIRCUITING 0
 #endif
@@ -24,7 +24,7 @@
 
 #if !defined(riscv64) && \
     (CONFIG_RISCV_HAVE_FP_TRAPS || CONFIG_TRAP_PIPELINED_EXCEPTIONS || CONFIG_RISCV_USE_ESTEP)
-#warning Disabling RISC-V FP Traps, Pipelined Exceptions, and Estep as it is not available on this architecture
+//#warning Disabling RISC-V FP Traps, Pipelined Exceptions, and Estep as it is not available on this architecture
 #undef CONFIG_RISCV_HAVE_FP_TRAPS
 #undef CONFIG_TRAP_PIPELINED_EXCEPTIONS
 #undef CONFIG_RISCV_USE_ESTEP

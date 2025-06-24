@@ -266,6 +266,8 @@ static int get_fpcsr(const ucontext_t *uc, arch_fp_csr_t *f) {
   return get_fpsr(uc, &f->fpsr) || get_fpcr(uc, &f->fpcr);
 }
 
+// not currently used but kept here for later
+__attribute__((unused))
 static int set_fpcsr(ucontext_t *uc, const arch_fp_csr_t *f) {
   return set_fpsr(uc, &f->fpsr) || set_fpcr(uc, &f->fpcr);
 }
@@ -500,6 +502,9 @@ void arch_set_round_mode(fpspy_round_config_t *config, fpspy_round_mode_t mode) 
       break;
     case FPSPY_ROUND_ZERO:
       *config |= 0xc00000;  // three
+      break;
+    default:
+      ERROR("rounding mode %d not supported on this architecture\n",mode);
       break;
   }
 }

@@ -121,7 +121,7 @@ typedef union {
     uint16_t res2 : 10;
     uint8_t il : 1;  // illegal execution state (?)
     uint8_t ss : 1;  // software single-step (trap mode)
-    uint8_t res3 : 6;
+    uint16_t res3 : 6;  // uint16_t used to deal with "note: offset of packed bit-field ‘res3’ has changed in GCC 4.4"
     uint8_t v : 1;  // overflow cc
     uint8_t c : 1;  // carry cc
     uint8_t z : 1;  // zero cc
