@@ -574,6 +574,9 @@ int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size) {
     return -1;
   } else {
     memcpy(dest, (const void *)uc->uc_mcontext.pc, 4);
+    if (size>4) {
+      memset(dest+4,0,size-4);
+    }
     return 4;
   }
 }
