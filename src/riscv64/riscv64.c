@@ -621,7 +621,7 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc) {
 
   ucontext_t *uc = (ucontext_t *)&fake_ucontext;
 
-  uint8_t *pc = (uint8_t *)uc->uc_mcontext.__gregs[REG_PC];
+  uint8_t __attribute__((unused)) *pc = (uint8_t *)uc->uc_mcontext.__gregs[REG_PC];
 
   DEBUG("PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n", si->si_signo, si->si_errno,
       si->si_code, si->si_addr, *(uint32_t *)pc);
