@@ -25,7 +25,7 @@ if ($ENV{FPSPY_ARCH}) {
     $myarch=$ENV{FPSPY_ARCH};
 } else {
     $myarch=`uname -m`;  chomp($myarch);
-    
+
     if ($myarch eq "x86_64") { $myarch = "x64";}
     if ($myarch eq "aarch64") { $myarch = "arm64";}
     if ($myarch eq "riscv64") { $myarch = "riscv64";}
@@ -35,7 +35,7 @@ open(RAW,'<:raw', $file) or die "Failed to open $file\n";
 
 
 while (1) {
-    $n = read(RAW,$rec, 32);  
+    $n = read(RAW,$rec, 32);
     last if ($n!=32);
     ($time, $rip, $rsp, $code, $mxcsr) = unpack("QQQLL",$rec);
     $n = read(RAW,$instr, 15);
@@ -43,7 +43,7 @@ while (1) {
     $n = read(RAW,$junk, 1); undef($junk);
     last if ($n!=1);
     $dec = $decode{$code};
-    if (!defined($dec)) { 
+    if (!defined($dec)) {
 	$dec = "UNDEF"
     }
     if ($myarch eq "x64") {
@@ -56,4 +56,3 @@ while (1) {
     print sprintf("%-16ld\t%s\t%016x\t%016x\t%08x\t%08x\t",$time, $dec, $rip,$rsp,$code,$mxcsr);
     print unpack("H*",$instr), "\n";
 }
-	

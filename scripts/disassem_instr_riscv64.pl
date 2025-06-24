@@ -6,6 +6,10 @@
 # Copyright (c) 2023 Peter Dinda - see LICENSE
 #
 
+$PRE="riscv64-unknown-linux-gnu-";
+$GCC = "$PRE"."gcc";
+$OBJ = "$PRE"."objdump";
+
 $#ARGV==-1 or $#ARGV==0 or die "usage: decode_instr_riscv64.pl hexbytes or < hexbytes\n";
 
 if ($#ARGV==0) {
@@ -19,7 +23,6 @@ if ($#ARGV==0) {
 	print $dechex,"\t",$instr,"\n";
     }
 }
-	
 
 sub doit {
     my $hex = shift;
@@ -27,24 +30,23 @@ sub doit {
 
     open(S,">__test.S") or die "Can't open intermediate file\n";
 
-    
     print S ".text\n.global foo\nfoo:\n";
-    
+
     # this assumes the instruction is 4 bytes long which
     # is the case for all F,D,G instructions
 
     for ($i=0;$i<8;$i+=2) {
 	print S "  .byte 0x", substr($hex,$i,2),"\n";
     }
-    
+
     close(S);
-    
+
     system("rm -f __test.o && gcc -c __test.S -o __test.o");
 
     # this only works on a "-D" on ARM for some reason I cannot
-    # fathom... so, assuming same issue here... 
+    # fathom... so, assuming same issue here...
     open(D,"objdump -D __test.o |") or die "can't disassemble\n";
-    
+
     while (my $l=<D>) {
 	chomp($l);
 	# on RISC-V the instruction should aways be on one line...
@@ -54,17 +56,9 @@ sub doit {
 
 	    $instr=~s/\t/ /g;
 #	    print "outhex=$outhex, instr=$instr\n";
-	    
 	    return ($outhex,$instr);
 	}
     }
     close(D);
     return undef;
 }
-
-
-
-	
-
-
-    

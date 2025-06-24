@@ -1,0 +1,125 @@
+mainmenu "FPSpy Configuration"
+
+choice
+    prompt "Target Architecture"
+    default ARCH_X64
+
+    config ARCH_X64
+        bool "x86 (64 bit)"
+	help
+            Intel 64 bit with at least SSE
+
+    config ARCH_ARM64
+        bool "ARM (64 bit)"
+	help
+	    ARM 64 bit architecture
+	    Note that individual mode will only work on machines
+	    that provide floating point traps, which are optional on ARM.
+
+    config ARCH_RISCV64
+        bool "RISC-V (64 bit)"
+	help
+	    RISC-V 64 bit architecture with at least F and D
+	    Note that individual mode will only work on a variant
+	    of RISC-V ("RAFT-V") that includes floating point traps.
+endchoice
+
+config TOOLCHAIN_PREFIX
+   string "Toolchain Prefix"
+   default ""
+   help
+      Prefix for all compilation tools (for cross-compilation use)
+      "riscv64-unknown-linux-gnu-" is used for cross-compiling
+      for riscv64, which is necessary for the RAFT-V setup
+
+
+config RISCV_HAVE_FP_TRAPS
+   bool "RISC-V Supports Floating Point Traps (RAFT-V)"
+   default n
+   depends on ARCH_RISCV64
+   help
+       Hardware support for floating point traps
+       Not available in standard RISC-V, only RAFT-V
+
+config RISCV_TRAP_PIPELINED_EXCEPTIONS
+   bool "Do Trap Delivery Via PPEs (RAFT-V)"
+   depends on RISCV_HAVE_FP_TRAPS
+   default n
+   help
+       Use hardware support for Precise Pipeline Exceptions (PPEs)
+       to deliver floating point traps
+       Not available in standard RISC-V, only RAFT-V
+       The kernel module also needs to be inserted
+
+config RISCV_USE_ESTEP
+   bool "Do Breakpoint Delivery vie PPEs (RAFT-V)"
+   depends on RISCV_HAVE_FP_TRAPS
+   default n
+   help
+       Use hardware support for Precise Pipeline Exections (PPEs)
+       to deliver breakpoint exceptions via the ESTEP instruction.
+       Not available on standard RISC-V, only RAFT-V
+       The kernel module also needs to be inserted
+
+config TRAP_SHORT_CIRCUITING
+   bool "Trap Short Circuiting"
+   depends on ARCH_X64
+   default n
+     help
+         Use kernel module support for fast delivery of
+	 floating point traps, if it is available.
+	 This feature is currently x86-specific.
+
+
+config INTERCEPT_MEMORY_FAULTS
+  bool "Intercept Memory Faults"
+  default y
+  help
+     Intercept SIGSEGV/SIGBUS ourselves
+
+config NO_OUTPUT
+    bool "Disable Output"
+    default n
+    help
+          Disable all output from fpspy (useful for production)
+
+config NO_DEBUG_OUTPUT
+    bool "Disable Debug Output"
+    depends on !NO_OUTPUT
+    default n
+    help
+          Disable all debug output from fpspy regardless of FPSPY_LOG_LEVEL
+
+config FORCE_DEBUG_OUTPUT
+    bool "Force Debug Output"
+    depends on !NO_DEBUG_OUTPUT && !NO_OUTPUT
+    default n
+    help
+          Enable all debug output from fpspy regardless of FPSPY_LOG_LEVEL
+
+
+menu "Parameters"
+   config MAX_CONTEXTS
+      int "Maximum Simultaneous Contexts"
+      default 1024
+      help
+          Maximum number of simultaneous contexts (threads, basically)
+	  that can be simultaneously traced.
+   config TRACE_BUFLEN
+      int "Trace Buffer Length"
+      default 1024
+      help
+          Number of trace records to buffer before writing to file
+	  0 means there is no buffering of trace records
+   config MAX_US_ON
+      int "Sampler Maximum Time On (us)"
+      default 10000
+      help
+          Maximum time the timing-based sampler (if used) can be in the ON state
+   config MAX_US_OFF
+      int "Sampler Maximum Time Off (us)"
+      default 1000000
+      help
+          Maximum time the timing-based sampler (if used) can be in the OFF state
+
+endmenu

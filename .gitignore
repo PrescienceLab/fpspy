@@ -3,3 +3,7 @@ test/build
 test/utils/riscv64/compile_flags.txt
 
 **.a
+
+# LSP stuff (Bear & clangd)
+**compile_commands.json
+/.cache
