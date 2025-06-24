@@ -124,7 +124,7 @@ struct delegate_config_t {
   unsigned long trap_mask;
 };
 
-#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#if CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS
 #include <fcntl.h>
 #include "riscv64.h"
 #include <sys/ioctl.h>

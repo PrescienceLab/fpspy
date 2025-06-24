@@ -1,7 +1,7 @@
 # See LICENSE for license details.
 
 #include <config.h>
-	
+
 #if __riscv_xlen == 64
 # define LREG ld
 # define SREG sd
@@ -16,10 +16,10 @@
   .global trap_entry
   .align 16
 trap_entry:
-#if !CONFIG_TRAP_PIPELINED_EXCEPTIONS && !CONFIG_RISCV_USE_ESTEP
-  // should never get called... 
+#if !CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS && !CONFIG_RISCV_USE_ESTEP
+  // should never get called...
   uret
-#else	
+#else
   addi sp, sp, -272
 
   SREG x1, 1*REGBYTES(sp)
