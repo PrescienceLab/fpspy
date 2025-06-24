@@ -527,6 +527,9 @@ int arch_get_instr_bytes(const ucontext_t *uc, uint8_t *dest, int size) {
     return -1;
   } else {
     memcpy(dest, (const void *)uc->uc_mcontext.__gregs[REG_PC], 4);
+    if (size>4) {
+      memset(dest+4,0,size-4);
+    }
     return 4;
   }
 }
@@ -547,7 +550,7 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc) {
 //
 // Entry point for FP Trap with pipelined exceptions on RISC-V
 //
-#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#if CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS
 
 void init_pipelined_exceptions(void) {
   int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
