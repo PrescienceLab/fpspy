@@ -6,7 +6,6 @@
 # Copyright (c) 2023 Peter Dinda - see LICENSE
 #
 
-
 $PRE="riscv64-unknown-linux-gnu-";
 $GCC = "$PRE"."gcc";
 $OBJ = "$PRE"."objdump";
@@ -25,13 +24,11 @@ if ($#ARGV==0) {
     }
 }
 
-
 sub doit {
     my $hex = shift;
     my $i;
 
     open(S,">__test.S") or die "Can't open intermediate file\n";
-
 
     print S ".text\n.global foo\nfoo:\n";
 
