@@ -5,7 +5,7 @@ companion FPVM project, which is why "fpvm" appears in
 this subdirectory.  The majority of changes are in how
 the interrupt return process works, and the code for
 that is in fpspy itself, in particular
-fpspy/src/x64/user_fpspy_entry.S
+`fpspy/src/x64/user_fpspy_entry.S`
 
 As with all kernel modules, this requires root to install, and it can
 be sensitive to particular kernel versions.  We test on an AMD EPYC
@@ -30,10 +30,10 @@ module itself.
 
 ### Use with FPSpy
 
-To use with FPSpy, you must enable the *CONFIG_TRAP_SHORT_CIRCUITING* feature
-in fpspy/include/config.h.   It is safe to enable this feature even if the
+To use with FPSpy, you must enable the Trap Short Circuiting feature
+using `make menuconfig` and then rebuild FPSpy.   It is safe to enable this feature even if the
 kernel module is not available, since FPSpy will fall back on regular
-SIGFPE signalling.
+`SIGFPE` signaling if it cannot communicate with the kernel module.
 
 ### To measure latencies
 
