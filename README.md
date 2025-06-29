@@ -1,17 +1,21 @@
-# FPSpy Tool
+# FPSpy: Spying on the Floating Point Behavior of Existing, Unmodified Binaries
 
-Copyright (c) 2017-2025 Peter A. Dinda  Please see `LICENSE` file.
 
-This is a tool for floating point exception interception and
+Copyright (c) 2017-2025 Peter A. Dinda.
+Please see `LICENSE` file for more information.
+
+FPSpy is part of the [Buoyancy Project](https://buoyancy-project.org) which is part of the [Prescience Lab](http://presciencelab.org).
+
+FPSpy is a tool for floating point exception interception and
 statistics gathering that can run underneath existing, unmodified
 binaries.   It can operate at the whole program level (or ROI), or at the level of individual machine instructions.
 
 The initial version of FPSpy is documented in
 
-P. Dinda, A. Bernat, C. Hetland, Spying on the Floating Point Behavior
-of Existing, Unmodifed Scientific Applications, Proceedings of the
+P. Dinda, A. Bernat, C. Hetland, *Spying on the Floating Point Behavior
+of Existing, Unmodifed Scientific Applications*, Proceedings of the
 29th ACM Symposium on High-performance Parallel and Distributed
-Computing (HPDC 2020), June, 2020.
+Computing (HPDC 2020), June, 2020. (Awarded Best Paper)  [pdf](http://pdinda.org/Papers/hpdc20.pdf)
 
 You can also see the comments in `src/fpspy.c` for some details of how
 this works and what it illustrates.
@@ -25,18 +29,18 @@ support for floating point traps and pipelined precise exceptions).
 
 Source the relevant environment file for your architecture:
 ```
-$ source ./ENV.x64
+source ./ENV.x64
 ```
 
 ### Configuration
 
 Create a default configuration:
 ```
-$ make defconfig
+make defconfig
 ```
 Update your configuration:
 ```
-$ make menuconfig
+make menuconfig
 ```
 You can now select features from the menu, including the specific architecture to target and toolchain to use.  Note that FPSpy can be configured to have no stdout or stderr output, which is useful for deployment scenarios where such noise would be unacceptable.   There are also a range of optimizations to reduce FPSpy's individual mode overhead (aggregate mode overhead is zero).
 
@@ -45,7 +49,7 @@ You can now select features from the menu, including the specific architecture t
 If you wish to use the kernel module on x64 (which considerably lowers
 the cost of floating point trap delivery to FPSpy), you will need to
 compile that next and insert it.  To do so, consult
-`kernel/x64/README.md`. 
+`kernel/x64/README.md`.
 
 
 ### Building and Testing
@@ -55,12 +59,12 @@ configuration as appropriate.
 
 To build:
 ```
-$ make
+make
 ```
 
 To test:
 ```
-$ make test
+make test
 ```
 You should now see a number of files with the suffix ".fpemon".   These
 are output traces captured from the test_fpspy.c program under various
@@ -74,11 +78,11 @@ you should now have a script on your path that provides a simple way to
 use FPSpy.   Suppose the program you want to run FPSpy under normally
 run as `./PROGRAM`.  Then:
 ```
-$ fpspy --aggregate ./PROGRAM
+fpspy --aggregate ./PROGRAM
 ```
 will run FPSpy under it in aggregate mode, and
 ```
-$ fpspy --individual ./PROGRAM
+fpspy --individual ./PROGRAM
 ```
 will run FPSpy under it in individual mode.   Aggregate mode
 will capture whether any monitored FP event occurs at least once during
@@ -93,7 +97,7 @@ model with configuration by environment variables.
 
 You generally want your environment configured as follows:
 ```
-$ export PATH=$FPSPY_DIR/bin/$ARCH:$FPSPY_DIR/scripts:$PATH
+export PATH=$FPSPY_DIR/bin/$ARCH:$FPSPY_DIR/scripts:$PATH
 ```
 The FPSpy code has two modes of operation:
 
@@ -111,7 +115,7 @@ calls.
 
 To run against a binary:
 ```
-$ LD_PRELOAD=fpspy.so [FPSPY_MODE=<mode>] [FPSPY_AGGRESSIVE=<yes|no>] exec.exe
+LD_PRELOAD=fpspy.so [FPSPY_MODE=<mode>] [FPSPY_AGGRESSIVE=<yes|no>] exec.exe
 ```
 The modes are `aggregate` and `individual` as noted above.   If no
 mode is given, aggregate mode is assumed.
@@ -165,15 +169,15 @@ broken.
 - `FPSPY_TIMER=real|virtual|prof`  (default `real`) selects the underlying timer that will be used for Poisson sampling
 
     - `virtual` timer essentially means user time (time the program spends actually executing user-level instructions without being blocked).  `FPSPY_POISSON=A:B`, and `FPSPY_TIMER=virtual`, `A` and `B` are interpretted as time spent awake.    This is probably what you want if you use the Poisson sampler.
-    - `real` timer means elapsed real time (wallclock time). 
-    - `prof` timer is virtual time in both kernel and user space, and using a signal the application is unlikely to be using.  
+    - `real` timer means elapsed real time (wallclock time).
+    - `prof` timer is virtual time in both kernel and user space, and using a signal the application is unlikely to be using.
 
 - `FPSPY_KICKSTART=y|n`  (default `n`) If set to `y`, then FPSpy does not start on the initial process
 until a `SIGTRAP` is delivered externally.   Otherwise, it starts immediately.
 This is useful under certain scenarios such as fuzzing where
 an external tool can determine a region of interest.
 
-- `FPSPY_ABORT=y|n`  (default `n`)  
+- `FPSPY_ABORT=y|n`  (default `n`)
  If enabled, FPSPY will crash the program with `SIGABRT` on the first floating point trap. This is especially useful for fuzzing.
 
 - `FPSPY_LOG_LEVEL=0|1|2` (default `2`)
@@ -193,22 +197,22 @@ if `ftz` is included, this means all denorms are rounded to zeros [Intel specifi
 
 #### Further examples
 
-For getting a sense of how `FPSPY_POISSON` operates, you can
+For getting a sense of how the Poisson sampler (`FPSPY_POISSON`) operates, you can
 run:
 ```
-$ make test_sleepy  (real timer)
+make test_sleepy  (real timer)
 ```
 or
 
 ```
-$ make test_dopey (virtual or profile timer)
+make test_dopey (virtual or profile timer)
 ```
 These test programs don't do much, but when combined with debug output enabled in FPSpy, you will be able to see the ON and OFF cycles of the Poisson sampler in operation.
 
-To get a sense of how `FPSPY_FORCE_ROUNDING` operates, you can
+To get a sense of how forced rounding mode (`FPSPY_FORCE_ROUNDING`) operates, you can
 run:
 ```
-$ make test_rounding
+make test_rounding
 ```
 This will show the effects of different forced rounding modes on a simple test program that rounds.
 
@@ -223,9 +227,9 @@ is self-explanatory.
 In individual mode, a trace is a binary format file which may be huge.
 We provide tools to display and analyze such traces.
 
-in `include/` and `src/`: 
+in `include/` and `src/`:
 
- - `libtrace.h` and `libtrace.c` is a library for  trace access from C via memory mapping.  The trace shows up as a giant array of structs. 
+ - `libtrace.h` and `libtrace.c` is a library for  trace access from C via memory mapping.  The trace shows up as a giant array of structs.
  - `trace_print.c` gives an example use of the library, simply printing the file in human-readable format.
 
 In `scripts/`:
