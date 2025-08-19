@@ -1503,7 +1503,7 @@ static int bringup_monitoring_context(int tid) {
   }
 #endif
 
-#if CONFIG_TRAP_PIPELINED_EXCEPTIONS
+#if CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS
   init_pipelined_exceptions();
 #endif
 
