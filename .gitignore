@@ -7,3 +7,8 @@ test/utils/riscv64/compile_flags.txt
 # LSP stuff (Bear & clangd)
 **compile_commands.json
 /.cache
+
+# KConfig stuff
+/.config*
+/config.mk
+**config.h
