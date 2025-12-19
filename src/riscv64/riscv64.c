@@ -150,6 +150,7 @@ void arch_reset_trap_mask(int which) {
 // FCSR used when *we* are executing floating point code
 // All masked, flags zeroed, round nearest, special features off
 #define FCSR_OURS 0x0000000000UL
+#define FFLAGS_OURS 0x0000000000UL
 
 void arch_get_machine_fp_csr(arch_fp_csr_t *f) {
   uint64_t fflags_mask = riscv_get_fflags_mask();
@@ -172,10 +173,13 @@ int arch_machine_supports_fp_traps(void) {
 }
 
 
-/* Do some FP compute, set up machine state to reflect that. */
+/* FPSpy wants to do some FP compute, set up machine state to reflect that.
+ * This disables both "pending" FP exceptions AND the FP enable flags in
+ * fflags_care. */
 void arch_config_machine_fp_csr_for_local(arch_fp_csr_t *old) {
   arch_get_machine_fp_csr(old);
   riscv_set_fcsr(FCSR_OURS);
+  riscv_set_fflags_mask(FFLAGS_OURS);
 }
 
 int arch_have_special_fp_csr_exception(int which) {
