@@ -926,12 +926,14 @@ static void update_sampler(monitoring_context_t *mc, ucontext_t *uc) {
     DEBUG("Switching from on to off\n");
     arch_clear_fp_exceptions(uc);          // Clear fpe
     arch_mask_fp_traps(uc);                // Mask fpe
-    arch_reset_trap(uc, &mc->trap_state);  // disable traps
+    /* FIXME: PAD: Take a look at this arch_reset_trap for ARM & RISC-V. */
+    /* arch_reset_trap(uc, &mc->trap_state);  // disable traps */
   } else {
     DEBUG("Switching from off to on\n");
     arch_clear_fp_exceptions(uc);          // Clear fpe
     arch_unmask_fp_traps(uc);              // Unmask fpe
-    arch_reset_trap(uc, &mc->trap_state);  // disable traps
+    /* FIXME: PAD: Take a look at this arch_reset_trap for ARM & RISC-V. */
+    /* arch_reset_trap(uc, &mc->trap_state);  // disable traps */
   }
 
   // schedule next wakeup
@@ -996,6 +998,12 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
     if (control_round_config) {
       arch_set_round_config(uc, orig_round_config);
     }
+    /* FIXME: PAD: Double check that this is correct on ARM & RISC-V!
+     * ARM & RISC-V don't have single-step mode, so this function overwrites
+     * instructions in the binary itself!
+     *
+     * Reset the trap state so we can attempt to gracefully shut down FPSPy.
+     * This function should ONLY be called if we CAME FROM an AWAIT_TRAP state. */
     arch_reset_trap(uc, mc ? &mc->trap_state : 0);  // best effort disable of trap
     if (!mc) {
       // this may end badly
@@ -1038,6 +1046,7 @@ void brk_trap_handler(siginfo_t *si, ucontext_t *uc) {
         arch_set_round_config(uc, our_round_config);
       }
     }
+    /* FIXME: PAD: Take a look at arch_reset_trap here for ARM & RISC-V! */
     arch_reset_trap(uc, &mc->trap_state);
     mc->state = AWAIT_FPE;
     if (mc->sampler.delayed_processing) {
@@ -1092,6 +1101,7 @@ void fp_trap_handler(siginfo_t *si, ucontext_t *uc) {
     if (control_round_config) {
       arch_set_round_config(uc, orig_round_config);
     }
+    /* FIXME: PAD: Take a look at arch_reset_trap here! */
     arch_reset_trap(uc, 0);  // best effort
     ERROR("surprise state %d during %s (rip=%p)\n", mc->state, __func__, (void *)arch_get_ip(uc));
 
@@ -1134,6 +1144,7 @@ void fp_trap_handler(siginfo_t *si, ucontext_t *uc) {
     if (control_round_config) {
       arch_set_round_config(uc, orig_round_config);
     }
+    /* FIXME: PAD: Take a look at this arch_reset_trap. */
     arch_reset_trap(uc, &mc->trap_state);
     abort_operation("Surprise state during fp_trap_handler exec");
   }
