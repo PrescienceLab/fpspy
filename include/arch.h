@@ -84,13 +84,19 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc);
 // Implementation must let us trap on the *next* instruction after the
 // current one in the ucontext.
 // state points to a location where the implementation can
-// stash state on a "set_trap" and then see it again on "reset_trap".
+// stash state on a "set_trap_mode" and then see it again on "reset_trap_mode".
+// The implementation needs to internally track whether a "reset_trap_mode"
+// makes sense given the state.  Examples where "reset_trap_mode" might be
+// called without a preceding set_trap_mode include initialization (first call)
+// and spurious calls for cleanup.   (Yes, this is hideous, but it
+// works like this since the assumption is that the architecture
+// behaves like "trap mode" on x86).
 // If state==NULL, then the implementation should do the best it can
 // If this happens, it is because of a surprise abort in FPSpy in which
 // we cannot find the monitoring context of the thread.
-void arch_set_trap(ucontext_t *uc, uint64_t *state);
-// disable the trap for the *current* instruction
-void arch_reset_trap(ucontext_t *uc, uint64_t *state);
+void arch_set_trap_mode(ucontext_t *uc, uint64_t *state);
+// disable trap mode for the *current* instruction
+void arch_reset_trap_mode(ucontext_t *uc, uint64_t *state);
 
 // Implementation must allow us to clear all FP exceptions in the ucontext
 void arch_clear_fp_exceptions(ucontext_t *uc);

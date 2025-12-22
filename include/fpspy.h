@@ -46,7 +46,7 @@ typedef struct monitoring_context {
   int tid;
   int fd;
   uint64_t count;
-  uint64_t trap_state;      // for use by the architectural trap mechanism
+  uint64_t trap_mode_state;      // for use by the architectural trap mode mechanism
   sampler_state_t sampler;  // used only when sampling is on
   // for buffering of trace records
   uint64_t trace_record_count;
