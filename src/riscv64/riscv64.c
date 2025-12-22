@@ -328,6 +328,15 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc) {
 #define BRK_INSTR 0x90029002
 #endif
 
+
+// for trap mode on riscv, we emulate this using breakpoints
+// top 32 bits of state are the instruction that have replaced
+// bottom 32 bits are payload.   Payload currently consists
+// only of state:
+#define TRAP_MODE_INIT 0
+#define TRAP_MODE_OFF  1   // no breakpoint has been inserted
+#define TRAP_MODE_ON   2   // a breakpoint has been inserted (old instruction in state)
+
 #define ENCODE(p, inst, data) (*(uint64_t *)(p)) = ((((uint64_t)(inst)) << 32) | ((uint32_t)(data)))
 #define DECODE(p, inst, data)                    \
   (inst) = (uint32_t)((*(uint64_t *)(p)) >> 32); \
@@ -338,7 +347,7 @@ static inline uint64_t insn_len(uintptr_t pc) {
   return (inst & 3) ? 4 : 2;
 }
 
-void arch_set_trap(ucontext_t *uc, uint64_t *state) {
+void arch_set_trap_mode(ucontext_t *uc, uint64_t *state) {
   DEBUG("%s (0x%016lx): mcontext PC: 0x%016lx\n", __func__, (uintptr_t)arch_set_trap,
       uc->uc_mcontext.__gregs[REG_PC]);
   // Figure out how long this instruction was so we can move our trap target on
@@ -348,8 +357,9 @@ void arch_set_trap(ucontext_t *uc, uint64_t *state) {
   uint32_t *next_inst = (uint32_t *)(fp_pc + fp_inst_width);
 
   if (state) {
+    // it should be the case that were are in TRAP_MODE_OFF
     uint32_t orig_next_inst = *next_inst;
-    ENCODE(state, orig_next_inst, 2);  // "2" => Stash original next inst
+    ENCODE(state, orig_next_inst, TRAP_MODE_ON);
     *next_inst = BRK_INSTR;
     /* NOTE: Even if the target instruction (the instruction AFTER the one we
      * patched a breakpoint onto) is a compressed instruction, clearing the full
@@ -362,7 +372,7 @@ void arch_set_trap(ucontext_t *uc, uint64_t *state) {
   }
 }
 
-void arch_reset_trap(ucontext_t *uc, uint64_t *state) {
+void arch_reset_trap_mode(ucontext_t *uc, uint64_t *state) {
   uint32_t *target = (uint32_t *)(uc->uc_mcontext.__gregs[REG_PC]);
 
   if (state) {
@@ -372,12 +382,17 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state) {
     DECODE(state, instr, flag);
 
     switch (flag) {
-      case 0:  // flag 0 = 1st trap to kick off machine
-        DEBUG("skipping rewrite of instruction on first trap\n");
+      case TRAP_MODE_INIT:
+        ENCODE(state, 0, TRAP_MODE_OFF);
+        DEBUG("skipping rewrite of instruction on intialization\n");
         break;
-      case 2:  // flag 2 = trap due to inserted breakpoint instruction
+      case TRAP_MODE_OFF:
+        DEBUG("skipping rewrite of instruction because trap mode is already off\n");
+	break;
+      case TRAP_MODE_ON:
         *target = instr;
         __builtin___clear_cache(target, ((void *)target) + 4);
+	ENCODE(state, 0, TRAP_MODE_OFF);
         DEBUG("target at %p has been restored to original instruction %08x\n", target, instr);
         break;
       default:
