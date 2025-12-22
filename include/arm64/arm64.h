@@ -175,8 +175,8 @@ int arch_have_special_fp_csr_exception(int which);
 void arch_dump_gp_csr(const char *pre, const ucontext_t *uc);
 void arch_dump_fp_csr(const char *pre, const ucontext_t *uc);
 
-void arch_set_trap(ucontext_t *uc, uint64_t *state);
-void arch_reset_trap(ucontext_t *uc, uint64_t *state);
+void arch_set_trap_mode(ucontext_t *uc, uint64_t *state);
+void arch_reset_trap_mode(ucontext_t *uc, uint64_t *state);
 
 void arch_clear_fp_exceptions(ucontext_t *uc);
 

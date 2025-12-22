@@ -335,21 +335,29 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc) {
 }
 
 
+// for trap mode on arm, we emulate this using breakpoints
+// top 32 bits of state are the instruction that have replaced
+// bottom 32 bits are payload.   Payload currently consists
+// only of state:
+#define TRAP_MODE_INIT 0
+#define TRAP_MODE_OFF  1   // no breakpoint has been inserted
+#define TRAP_MODE_ON   2   // a breakpoint has been inserted (old instruction in state)
+
 //  brk	#23
 #define BRK_INSTR 0xd42002e0
-
 
 #define ENCODE(p, inst, data) (*(uint64_t *)(p)) = ((((uint64_t)(inst)) << 32) | ((uint32_t)(data)))
 #define DECODE(p, inst, data)                    \
   (inst) = (uint32_t)((*(uint64_t *)(p)) >> 32); \
   (data) = (uint32_t)((*(uint64_t *)(p)));
 
-void arch_set_trap(ucontext_t *uc, uint64_t *state) {
+void arch_set_trap_mode(ucontext_t *uc, uint64_t *state) {
   uint32_t *target = (uint32_t *)(uc->uc_mcontext.pc + 4);  // all instructions are 4 bytes
 
   if (state) {
+    // it should be the case that were are in TRAP_MODE_OFF
     // uint32_t old = *target;
-    ENCODE(state, *target, 2);  // "2"=> we are stashing the old instruction
+    ENCODE(state, *target, TRAP_MODE_ON);
     *target = BRK_INSTR;
     __builtin___clear_cache(target, ((void *)target) + 4);
     // DEBUG("breakpoint instruction (%08x) inserted at %p overwriting %08x (state
@@ -359,7 +367,7 @@ void arch_set_trap(ucontext_t *uc, uint64_t *state) {
   }
 }
 
-void arch_reset_trap(ucontext_t *uc, uint64_t *state) {
+void arch_reset_trap_mode(ucontext_t *uc, uint64_t *state) {
   uint32_t *target = (uint32_t *)(uc->uc_mcontext.pc);
 
   if (state) {
@@ -369,12 +377,17 @@ void arch_reset_trap(ucontext_t *uc, uint64_t *state) {
     DECODE(state, instr, flag);
 
     switch (flag) {
-      case 0:  // flag 0 = 1st trap to kick off machine
-        // DEBUG("skipping rewrite of instruction on first trap\n");
+      case TRAP_MODE_INIT:
+        ENCODE(state, 0, TRAP_MODE_OFF);
+        DEBUG("skipping rewrite of instruction on intialization\n");
         break;
-      case 2:  // flag 2 = trap due to inserted breakpoint instruction
+      case TRAP_MODE_OFF:
+        DEBUG("skipping rewrite of instruction because trap mode is already off\n");
+	break;
+      case TRAP_MODE_ON:
         *target = instr;
         __builtin___clear_cache(target, ((void *)target) + 4);
+	ENCODE(state, 0, TRAP_MODE_OFF);
         // DEBUG("target at %p has been restored to original instruction %08x\n",target,instr);
         break;
       default:
