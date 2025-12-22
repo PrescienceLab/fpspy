@@ -164,17 +164,27 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc) {
       m->daz ? "DAZ" : "", m->fz ? "FTZ" : "");
 }
 
-void arch_set_trap(ucontext_t *uc, uint64_t *state) {
+// for trap mode on x64, we simply manipulate
+// the actual hardware trap mode
+#define TRAP_MODE_INIT 0
+#define TRAP_MODE_OFF  1
+#define TRAP_MODE_ON   2
+
+// simply turn on trap mode
+void arch_set_trap_mode(ucontext_t *uc, uint64_t *state) {
+  // should be TRAP_MODE_OFF
   uc->uc_mcontext.gregs[REG_EFL] |= 0x100UL;
   if (state) {
-    *state = 2;
+    *state = TRAP_MODE_ON;
   }
 }
 
-void arch_reset_trap(ucontext_t *uc, uint64_t *state) {
+// simply turn off trap mode
+void arch_reset_trap_mode(ucontext_t *uc, uint64_t *state) {
+  // should be in TRAP_MODE_ON or TRAP_MODE_INIT
   uc->uc_mcontext.gregs[REG_EFL] &= ~0x100UL;
   if (state) {
-    *state = 1;
+    *state = TRAP_MODE_OFF;
   }
 }
 
