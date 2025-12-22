@@ -348,7 +348,7 @@ static inline uint64_t insn_len(uintptr_t pc) {
 }
 
 void arch_set_trap_mode(ucontext_t *uc, uint64_t *state) {
-  DEBUG("%s (0x%016lx): mcontext PC: 0x%016lx\n", __func__, (uintptr_t)arch_set_trap,
+  DEBUG("%s (0x%016lx): mcontext PC: 0x%016lx\n", __func__, (uintptr_t)arch_set_trap_mode,
       uc->uc_mcontext.__gregs[REG_PC]);
   // Figure out how long this instruction was so we can move our trap target on
   // the proper next instruction.
