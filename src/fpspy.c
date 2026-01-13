@@ -1151,7 +1151,7 @@ static void sigfpe_handler(int sig, siginfo_t *si, void *priv) {
   DEBUG("SIGFPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n", (void *)arch_get_ip(uc),
       (void *)arch_get_sp(uc), arch_get_fp_csr(uc), arch_get_gp_csr(uc));
 
-  if (log_level > 0) {
+  if (FORCE_DEBUG || (DO_DEBUG && (log_level >= 1))) {
     char buf[80];
 
     switch (si->si_code) {
@@ -1353,7 +1353,7 @@ void fpspy_short_circuit_handler(void *priv) {
       rip[5], rip[6], rip[7], rip[8], rip[9], rip[10], rip[11], rip[12], rip[13], rip[14], rip[15]);
   DEBUG("SCFPE RIP=%p RSP=%p\n", rip, (void *)uc->uc_mcontext.gregs[REG_RSP]);
 
-  if (log_level > 0) {
+  if (FORCE_DEBUG || (DO_DEBUG && (log_level >= 1))) {
     char buf[80];
 
     switch (si->si_code) {
