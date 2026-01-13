@@ -34,7 +34,7 @@ extern unsigned char log_level;
 #else
 #define DEBUG(S, ...)                                                    \
   do {                                                                   \
-    if (FORCE_DEBUG || (DO_DEBUG && log_level > 1)) {                    \
+    if (FORCE_DEBUG || (DO_DEBUG && log_level >= 1)) {                   \
       fprintf(stderr, "fpspy: debug(%8d): " S, gettid(), ##__VA_ARGS__); \
     }                                                                    \
   } while (0)

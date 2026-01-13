@@ -1151,7 +1151,7 @@ static void sigfpe_handler(int sig, siginfo_t *si, void *priv) {
   DEBUG("SIGFPE ip=%p sp=%p fpcsr=%016lx gpcsr=%016lx\n", (void *)arch_get_ip(uc),
       (void *)arch_get_sp(uc), arch_get_fp_csr(uc), arch_get_gp_csr(uc));
 
-  if (log_level > 1) {
+  if (log_level > 0) {
     char buf[80];
 
     switch (si->si_code) {
@@ -1353,7 +1353,7 @@ void fpspy_short_circuit_handler(void *priv) {
       rip[5], rip[6], rip[7], rip[8], rip[9], rip[10], rip[11], rip[12], rip[13], rip[14], rip[15]);
   DEBUG("SCFPE RIP=%p RSP=%p\n", rip, (void *)uc->uc_mcontext.gregs[REG_RSP]);
 
-  if (log_level > 1) {
+  if (log_level > 0) {
     char buf[80];
 
     switch (si->si_code) {
@@ -1792,14 +1792,14 @@ static __attribute__((constructor)) void fpspy_init(void) {
   INFO("init\n");
   DEBUG("%s is located at 0x%016lx\n", __func__, (uintptr_t)fpspy_init);
   if (!inited) {
-    if (getenv("FPSPY_LOG_LEVEL")) {
-      char *nptr = getenv("FPSPY_LOG_LEVEL");
+    if (getenv("FPSPY_DEBUG_LEVEL")) {
+      char *nptr = getenv("FPSPY_DEBUG_LEVEL");
       char *endptr = NULL;
       long ret = strtol(nptr, &endptr, 10);
-      if (*nptr != '\0' && *endptr == '\0' && 0 <= ret && ret <= 2) {
+      if (*nptr != '\0' && *endptr == '\0' && (0 == ret || ret == 1)) {
         log_level = ret;
       } else {
-        ERROR("FPSPY_LOG_LEVEL must be one of [0 | 1 | 2], but %ld was found\n", ret);
+        ERROR("FPSPY_DEBUG_LEVEL must be one of [0 | 1], but %ld was found\n", ret);
         abort();
       }
     }

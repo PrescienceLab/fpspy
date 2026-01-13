@@ -88,14 +88,14 @@ config NO_DEBUG_OUTPUT
     depends on !NO_OUTPUT
     default n
     help
-          Disable all debug output from fpspy regardless of FPSPY_LOG_LEVEL
+          Disable all debug output from fpspy regardless of FPSPY_DEBUG_LEVEL
 
 config FORCE_DEBUG_OUTPUT
     bool "Force Debug Output"
     depends on !NO_DEBUG_OUTPUT && !NO_OUTPUT
     default n
     help
-          Enable all debug output from fpspy regardless of FPSPY_LOG_LEVEL
+          Enable all debug output from fpspy regardless of FPSPY_DEBUG_LEVEL
 
 
 menu "Parameters"
