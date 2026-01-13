@@ -12,10 +12,28 @@
 # define REGBYTES 4
 #endif
 
+#define CSR_USCRATCH 0x840
 #define CSR_UEPC 0x841
 #define CSR_UCAUSE 0x842
 
   .section ".text"
+
+/* Read from the cycle counter and stash it into USCRATCH. We must be careful
+ * about which integer register we clobber here and the manner in which we do it
+ * so that we do not destroy any state unnecessarily. We MUST clobber an integer
+ * register since there are no instructions to transfer a value from one CSR to
+ * another CSR in RISC-V.
+ * STEPS:
+ * 1. uscratch <- x1 for safe keeping
+ * 2. x1 <- cycles
+ * 3. x1 <- uscratch (stashed x1) AND SIMULTANEOUSLY
+ *    uscratch <- x1 (cycle count) */
+  .macro CYCLES_TO_USCRATCH
+  csrw CSR_USCRATCH, x1
+  rdcycle x1
+  csrrw x1, CSR_USCRATCH, x1
+  .endm
+
   .global trap_entry
   .align 16
 trap_entry:
@@ -23,6 +41,10 @@ trap_entry:
   // should never get called...
   uret
 #else
+  /* NOTE: This rdcycle should NOT be in the final handler implementation. We
+   * only need it here for timing the inst->handler->next-inst sequence. */
+  CYCLES_TO_USCRATCH
+
   addi sp, sp, -272
 
   SREG x1, 1*REGBYTES(sp)
@@ -107,5 +129,11 @@ trap_entry:
   LREG x31, 31*REGBYTES(sp)
 
   addi sp, sp, 272
+
+  /* Like at the start of this ASM procedure, we capture the time we leave this
+   * handler right before we execute the URET, so that we can measure the time
+   * required for us to jump back to the location we specified in uepc above. */
+  CYCLES_TO_USCRATCH
+
   uret
 #endif
