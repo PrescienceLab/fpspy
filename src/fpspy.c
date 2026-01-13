@@ -1802,10 +1802,6 @@ static __attribute__((constructor)) void fpspy_init(void) {
         ERROR("FPSPY_LOG_LEVEL must be one of [0 | 1 | 2], but %ld was found\n", ret);
         abort();
       }
-
-      if (log_level == 0) {
-        create_monitor_file = 0;
-      }
     }
     if (getenv("FPSPY_MODE")) {
       if (!strcasecmp(getenv("FPSPY_MODE"), "individual")) {
