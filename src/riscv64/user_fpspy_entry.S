@@ -12,6 +12,9 @@
 # define REGBYTES 4
 #endif
 
+#define CSR_UEPC 0x841
+#define CSR_UCAUSE 0x842
+
   .section ".text"
   .global trap_entry
   .align 16
@@ -62,14 +65,14 @@ trap_entry:
    * then we MUST reload this value off the stack, instead of having handle_ppe
    * return a new UEPC.
    * NOTE: This UEPC value in a1 is ALSO passed through to handle_ppe now. */
-  csrr a1, 0x841 // uepc
+  csrr a1, CSR_UEPC
   SREG a1, 0*REGBYTES(sp)
 
-  csrr a0, 0x842 // ucause
+  csrr a0, CSR_UCAUSE
   mv a2, sp
   la s3, handle_ppe
   jalr s3
-  csrw 0x841, a0
+  csrw CSR_UEPC, a0
 
   LREG x1, 1*REGBYTES(sp)
   LREG x2, 2*REGBYTES(sp)
