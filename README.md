@@ -179,11 +179,16 @@ an external tool can determine a region of interest.
 
 - `FPSPY_ABORT=y|n`  (default `n`)
  If enabled, FPSPY will crash the program with `SIGABRT` on the first floating point trap. This is especially useful for fuzzing.
+ NOTE: When enabled, FPSpy will ***not*** create a monitor/trace file (`*.fpemon`)!
 
 - `FPSPY_DEBUG_LEVEL=0|1` (default `1`)
  If set to 0, `DEBUG` statements will be disabled.
  If set to 1, all `DEBUG` statements will be enabled.
  Note that you can also configure the codebase (`make menuconfig`) to force-enable or force-disable all `DEBUG` output.
+
+- `FPSPY_ENABLE_TRACE=y|n` (default `y`)
+ If enabled, FPSpy will create a monitoring file (`*.fpemon`) that records all FP events.
+ If disabled, then FPSpy will not create a monitoring file whatsoever.
 
 - `FPSPY_KERNEL=y|n`  (default `n`)
 Attempt to use kernel support to make FP traps faster.

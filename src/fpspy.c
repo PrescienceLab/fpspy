@@ -1530,9 +1530,10 @@ static int teardown_monitoring_context(int tid) {
   // add later - not relevant now PAD
   // deinit_sampler(&mc->sampler);
 
-  flush_trace_records(mc);
-
-  close(mc->fd);
+  if (create_monitor_file != 0) {
+    flush_trace_records(mc);
+    close(mc->fd);
+  }
 
   free_monitoring_context(tid);
 
@@ -1803,6 +1804,10 @@ static __attribute__((constructor)) void fpspy_init(void) {
         abort();
       }
     }
+    if (getenv("FPSPY_ENABLE_TRACE") && tolower(getenv("FPSPY_ENABLE_TRACE")[0]) == 'n') {
+      DEBUG("Disabling trace file output (*.fpemon)\n");
+      create_monitor_file = 0;
+    }
     if (getenv("FPSPY_MODE")) {
       if (!strcasecmp(getenv("FPSPY_MODE"), "individual")) {
         if (!arch_machine_supports_fp_traps()) {
@@ -1890,6 +1895,7 @@ static __attribute__((constructor)) void fpspy_init(void) {
     }
     if (getenv("FPSPY_ABORT") && tolower(getenv("FPSPY_ABORT")[0]) == 'y') {
       abort_on_fpe = 1;
+      create_monitor_file = 0;
     }
     if (bringup()) {
       ERROR("cannot bring up framework\n");
@@ -1908,25 +1914,31 @@ static __attribute__((constructor)) void fpspy_init(void) {
 // dumped to a file at this point
 //
 static void handle_aggregate_thread_exit() {
-  char buf[80];
-  int fd;
-  DEBUG("Dumping aggregate exceptions\n");
   // show_current_fe_exceptions();
-  sprintf(buf, "__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0), gettid());
-  if ((fd = open(buf, O_CREAT | O_WRONLY, 0666)) < 0) {
-    ERROR("Cannot open monitoring output file\n");
-  } else {
-    if (!aborted) {
-      stringify_current_fe_exceptions(buf);
-      strcat(buf, "\n");
+  /* If this thread is in aggregate mode, then the monitoring file was not
+   * created before. So this thread needs to do it now that it is exiting. */
+  if (create_monitor_file != 0) {
+    DEBUG("Dumping aggregate exceptions\n");
+    char buf[80];
+    int fd;
+    sprintf(buf, "__%s.%lu.%d.aggregate.fpemon", program_invocation_short_name, time(0), gettid());
+    if ((fd = open(buf, O_CREAT | O_WRONLY, 0666)) < 0) {
+      ERROR("Cannot open monitoring output file\n");
     } else {
-      strcpy(buf, "ABORTED\n");
+      if (!aborted) {
+        stringify_current_fe_exceptions(buf);
+        strcat(buf, "\n");
+      } else {
+        strcpy(buf, "ABORTED\n");
+      }
+      if (writeall(fd, buf, strlen(buf))) {
+        ERROR("Failed to write all of monitoring output\n");
+      }
+      DEBUG("aggregate exception string: %s", buf);
+      close(fd);
     }
-    if (writeall(fd, buf, strlen(buf))) {
-      ERROR("Failed to write all of monitoring output\n");
-    }
-    DEBUG("aggregate exception string: %s", buf);
-    close(fd);
+  } else {
+    DEBUG("Skipping dumping aggregate exceptions\n");
   }
 }
 
@@ -1945,7 +1957,9 @@ static __attribute__((destructor)) void fpspy_deinit(void) {
       DEBUG("FPE exceptions previously dumped to files - now closing them\n");
       for (i = 0; i < CONFIG_MAX_CONTEXTS; i++) {
         if (context[i].tid) {
-          close(context[i].fd);
+          if (create_monitor_file != 0) {
+            close(context[i].fd);
+          }
         }
       }
 #if CONFIG_TRAP_SHORT_CIRCUITING
