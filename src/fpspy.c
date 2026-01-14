@@ -481,7 +481,7 @@ void abort_operation(char *reason) {
 
         r.time = arch_cycle_count() - mc->start_time;
 
-        if (push_trace_record(mc, &r)) {
+        if ((create_monitor_file != 0) && push_trace_record(mc, &r)) {
           ERROR("Failed to push abort record\n");
         }
       }
@@ -1114,7 +1114,7 @@ void fp_trap_handler(siginfo_t *si, ucontext_t *uc) {
     //    DEBUG("writing record: %lu ip=%p sp=%p code=0x%x, fpcsr=%08x, inst=%08x\n",
     //           r.time, r.rip, r.rsp, r.code, r.mxcsr, *(uint32_t*)r.instruction);
 
-    if (push_trace_record(mc, &r)) {
+    if ((create_monitor_file != 0) && push_trace_record(mc, &r)) {
       ERROR("Failed to push record\n");
     }
   }
