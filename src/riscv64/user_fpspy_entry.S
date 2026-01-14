@@ -38,7 +38,7 @@
   .global trap_entry
   .align 16
 trap_entry:
-#if !CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS && !CONFIG_RISCV_USE_ESTEP
+#if !CONFIG_RISCV_TRAP_BYPASSED_EXCEPTIONS && !CONFIG_RISCV_USE_ESTEP
   // should never get called...
   uret
 #else
@@ -85,15 +85,15 @@ trap_entry:
    * gregs expect. On RISC-V GREG x0 (the zero register) is hardwired to zero,
    * so we do not need to save it. Instead, we can stash PC there instead.
    * FIXME: If we only use PC passed through the GREGS structure on the stack,
-   * then we MUST reload this value off the stack, instead of having handle_ppe
+   * then we MUST reload this value off the stack, instead of having handle_kbe
    * return a new UEPC.
-   * NOTE: This UEPC value in a1 is ALSO passed through to handle_ppe now. */
+   * NOTE: This UEPC value in a1 is ALSO passed through to handle_kbe now. */
   csrr a1, CSR_UEPC
   SREG a1, 0*REGBYTES(sp)
 
   csrr a0, CSR_UCAUSE
   mv a2, sp
-  la s3, handle_ppe
+  la s3, handle_kbe
   jalr s3
   csrw CSR_UEPC, a0
 

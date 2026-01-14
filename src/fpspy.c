@@ -1503,8 +1503,8 @@ static int bringup_monitoring_context(int tid) {
   }
 #endif
 
-#if CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS
-  init_pipelined_exceptions();
+#if CONFIG_RISCV_TRAP_BYPASSED_EXCEPTIONS
+  init_bypassed_exceptions();
 #endif
 
   c->start_time = arch_cycle_count();
@@ -1967,7 +1967,7 @@ static __attribute__((destructor)) void fpspy_deinit(void) {
         close(kernel_fd);
       }
 #endif
-      /* TODO: Close the RISC-V pipelined character device! */
+      /* TODO: Close the RISC-V bypassed character device! */
     }
   }
   arch_process_deinit();

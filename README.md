@@ -23,7 +23,7 @@ this works and what it illustrates.
 FPSpy has evolved considerably since the above paper.  It currently includes architecture independence, with support for
 x64, arm64 (for machines with floating point traps, which are
 optional on ARM), and riscv64 (for machines with our specialized
-support for floating point traps and pipelined precise exceptions).
+support for floating point traps and kernel-bypass exceptions).
 
 ### Architecture Selection
 

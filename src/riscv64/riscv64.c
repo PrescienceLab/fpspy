@@ -23,7 +23,7 @@ extern void trap_entry(void);
   Support for individual mode depends on having our
   extensions to the F and D mode extensions that support
   traps, and are currently just stubbed out. Ideally,
-  these traps are delivered by our pipeline exceptions
+  these traps are delivered by our kernel bypass
   extension.
 
   The (non-vector) floating point state consists of
@@ -313,8 +313,8 @@ void arch_dump_fp_csr(const char *pre, const ucontext_t *uc) {
 
 
 #if CONFIG_RISCV_USE_ESTEP
-// When using PPE, we can place a new "estep" instruction
-// which will cause a trap that is delivered via PPE
+// When using KBEs, we can place a new "estep" instruction
+// which will cause a trap that is delivered via KBE
 // this instruction is 32 bits.
 #define BRK_INSTR 0x00300073
 #else
@@ -567,23 +567,23 @@ uint64_t arch_get_fp_csr(const ucontext_t *uc) {
 }
 
 //
-// Entry point for FP Trap with pipelined exceptions on RISC-V
+// Entry point for FP Trap with bypassed exceptions on RISC-V
 //
-#if CONFIG_RISCV_TRAP_PIPELINED_EXCEPTIONS
+#if CONFIG_RISCV_TRAP_BYPASSED_EXCEPTIONS
 
-void init_pipelined_exceptions(void) {
-  int fd = open(PIPELINED_DELEGATE_FILE, O_RDWR);
+void init_bypassed_exceptions(void) {
+  int fd = open(BYPASSED_DELEGATE_FILE, O_RDWR);
   struct delegate_config_t config = {
       .en_flag = 1,
-      .trap_mask = PPE_TRAP_MASK,
+      .trap_mask = KBE_TRAP_MASK,
   };
 
-  DEBUG("Installing %s (0x%016lx) as pipelined delegation handler\n", "trap_entry",
+  DEBUG("Installing %s (0x%016lx) as bypassed delegation handler\n", "trap_entry",
       (uintptr_t)trap_entry);
 
-  ioctl(fd, PIPELINED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
-  ioctl(fd, PIPELINED_DELEGATE_DELEGATE_TRAPS, &config);
-  /* NOTE: You must leave the pipelined delegation character device open for the
+  ioctl(fd, BYPASSED_DELEGATE_INSTALL_HANDLER_TARGET, trap_entry);
+  ioctl(fd, BYPASSED_DELEGATE_DELEGATE_TRAPS, &config);
+  /* NOTE: You must leave the bypassed delegation character device open for the
    * ENTIRE lifetime of the process. Closing the character device resets the
    * core's delegation registers to a default state! */
 }
@@ -597,12 +597,12 @@ void init_pipelined_exceptions(void) {
 // that priv is pointing to all of the int registers that have
 // been saved on the stack on entry into the handler.
 // return value is the PC of next instruction
-static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc) {
+static uintptr_t kbe_fpe_handler(void *priv, uintptr_t epc) {
   // Build up a sufficiently detailed ucontext_t and
   // call the shared handler.  Copy in/out the FP and GP
   // state
-  DEBUG("%s (0x%016lx): PPE Handling FPE! Building fake siginfo & ucontext\n", __func__,
-      (uintptr_t)ppe_fpe_handler);
+  DEBUG("%s (0x%016lx): KBE Handling FPE! Building fake siginfo & ucontext\n", __func__,
+      (uintptr_t)kbe_fpe_handler);
 
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext = {0};
@@ -642,9 +642,9 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc) {
 
   uint8_t __attribute__((unused)) *pc = (uint8_t *)uc->uc_mcontext.__gregs[REG_PC];
 
-  DEBUG("PPE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n", si->si_signo, si->si_errno,
+  DEBUG("KBE-FPE signo 0x%x errno 0x%x code 0x%x pc %p 0x%08x\n", si->si_signo, si->si_errno,
       si->si_code, si->si_addr, *(uint32_t *)pc);
-  DEBUG("PPE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
+  DEBUG("KBE-FPE PC=%p SP=%p\n", pc, (void *)uc->uc_mcontext.__gregs[REG_SP]);
 
   if (log_level > 1) {
     char buf[80];
@@ -688,27 +688,27 @@ static uintptr_t ppe_fpe_handler(void *priv, uintptr_t epc) {
   /* Restore the FCSR's FP event bits. */
   riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
 
-  DEBUG("PPE-FPE  done\n");
+  DEBUG("KBE-FPE  done\n");
 
   return epc;
 }
 
-/* ESTEPs are a pipeline-able exception cause that has been added to RISC-V for
- * the express purpose of being delegable. In theory, breakpoints could be
- * pipeline delegated too, but that would interfere with traditional dbugging
+/* ESTEPs are a kernel-bypassable exception cause that has been added to RISC-V
+ * for the express purpose of being delegable. In theory, breakpoints could
+ * bypass the kernel too, but that would interfere with traditional debugging
  * tools, like GDB or Valgrind. In an effort to make things behave like people
  * would expect, we introduced ESTEP, which is IDENTICAL to EBREAK, except for
  * the fact that no external software (GDB) will issue an ESTEP instruction. */
 
-/* Like the PPE FPE handler above, we construct a fake siginfo_t and ucontext_t
+/* Like the KBE FPE handler above, we construct a fake siginfo_t and ucontext_t
  * structs so that the arch-independent code works seamlessly.
  * When handling an ESTEP, this was intended to REPLACE the instruction
  * immediately AFTER the FP instruction. So we need to clean up and return the
  * original instruction, along with returning a set of FP flags that make sense
  * for the instruction we just executed. */
-static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
-  DEBUG("%s (0x%016lx): PPE Handling ESTEP! Building fake siginfo & ucontext\n", __func__,
-      (uintptr_t)ppe_estep_handler);
+static uintptr_t kbe_estep_handler(void *real_gregs, uintptr_t epc) {
+  DEBUG("%s (0x%016lx): KBE Handling ESTEP! Building fake siginfo & ucontext\n", __func__,
+      (uintptr_t)kbe_estep_handler);
   siginfo_t fake_siginfo = {0};
   ucontext_t fake_ucontext = {0};
 
@@ -734,22 +734,22 @@ static uintptr_t ppe_estep_handler(void *real_gregs, uintptr_t epc) {
   /* Restore the FCSR's FP event bits. */
   riscv_set_fcsr(fake_ucontext.uc_mcontext.__fpregs.__d.__fcsr);
 
-  DEBUG("PPE ESTEP done\n");
+  DEBUG("KBE ESTEP done\n");
 
   return skip_estep ? epc + 4 : epc;
 }
 
-// this is where the pipelined exception will land, and we will dispatch
+// this is where the bypassed exception will land, and we will dispatch
 // to the fpspy_short_circuit_handler
-uintptr_t handle_ppe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
-  DEBUG("%s (0x%016lx): Handling pipelined trap\n", __func__, (uintptr_t)handle_ppe);
+uintptr_t handle_kbe(uintptr_t cause, uintptr_t epc, uintptr_t regs[32]) {
+  DEBUG("%s (0x%016lx): Handling bypassed trap\n", __func__, (uintptr_t)handle_kbe);
   void *real_gregs = (void *)regs;
   switch (cause) {
     case EXC_FLOATING_POINT:
-      epc = ppe_fpe_handler(real_gregs, epc);
+      epc = kbe_fpe_handler(real_gregs, epc);
       break;
     case EXC_INSTRUCTION_STEP:
-      epc = ppe_estep_handler(real_gregs, epc);
+      epc = kbe_estep_handler(real_gregs, epc);
       break;
     default:
       abort_operation("Received unexpected trap cause!");

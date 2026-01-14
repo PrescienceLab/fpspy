@@ -41,22 +41,22 @@ config RISCV_HAVE_FP_TRAPS
        Hardware support for floating point traps
        Not available in standard RISC-V, only RAFT-V
 
-config RISCV_TRAP_PIPELINED_EXCEPTIONS
-   bool "Do Trap Delivery Via PPEs (RAFT-V)"
+config RISCV_TRAP_BYPASSED_EXCEPTIONS
+   bool "Do Trap Delivery Via KBEs (RAFT-V)"
    depends on RISCV_HAVE_FP_TRAPS
    default n
    help
-       Use hardware support for Precise Pipeline Exceptions (PPEs)
+       Use hardware support for Kernel-Bypass Exceptions (KBEs)
        to deliver floating point traps
        Not available in standard RISC-V, only RAFT-V
        The kernel module also needs to be inserted
 
 config RISCV_USE_ESTEP
-   bool "Do Breakpoint Delivery vie PPEs (RAFT-V)"
+   bool "Do Breakpoint Delivery vie KBEs (RAFT-V)"
    depends on RISCV_HAVE_FP_TRAPS
    default n
    help
-       Use hardware support for Precise Pipeline Exections (PPEs)
+       Use hardware support for Kernel-Bypass Exceptions (KBEs)
        to deliver breakpoint exceptions via the ESTEP instruction.
        Not available on standard RISC-V, only RAFT-V
        The kernel module also needs to be inserted
