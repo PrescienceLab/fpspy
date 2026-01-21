@@ -727,7 +727,12 @@ static uintptr_t kbe_estep_handler(void *real_gregs, uintptr_t epc) {
 
   monitoring_context_t *mc = find_monitoring_context(gettid());
 
-  /* NOTE: skip_estep MUST come before brk_trap_handler! */
+  /* NOTE: skip_estep MUST come before brk_trap_handler! We need to know if this
+   * is the "kick" ESTEP or one from normal execution. If this is the kick ESTEP
+   * then we need to step over the ESTEP (epc + 4) so we actually get out of
+   * initialization. If this is an ESTEP from normal execution, then we DO want
+   * to return to the epc, since brk_trap_handler is supposed to restore the
+   * original 4 bytes the ESTEP temporarily replaced. */
   int skip_estep = mc && mc->state == INIT;
   brk_trap_handler(si, &fake_ucontext);
 
