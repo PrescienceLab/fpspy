@@ -74,6 +74,8 @@ trap_entry:
   mv a2, sp
   la s3, handle_kbe
   jalr s3
+  /* We expect handle_kbe to return the address this KBE handler should to,
+   * which RISC-V says is in the a0 register. Put that address into UEPC. */
   csrw CSR_UEPC, a0
 
   LREG x1, 1*REGBYTES(sp)
